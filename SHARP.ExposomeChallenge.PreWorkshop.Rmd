@@ -1,0 +1,312 @@
+---
+title: 'SHARP Multiomics Workshop: Exposome Challenge Data: Pre-Workshop'
+author: "David Conti"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+---
+
+```{css, echo=FALSE}
+pre {
+  max-height: 200px;
+  overflow-y: auto;
+}
+```
+
+```{r setup, include=FALSE, echo=FALSE}
+library(knitr)
+library(reshape2)
+library(ggplot2)
+library(epiR)
+library(summarytools) # for summarizing variables
+library(tidyverse)
+library(glmnet)
+library(Biobase)
+options(knitr.table.format = "html")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Data Analysis setup, echo=FALSE }
+setwd("~/Google Drive/My Drive/Class/SHARP.MultiomicWorkshop/ExposomeChallengeData")
+
+exposure.group <- "Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
+outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+covariate.Names <- c("h_mbmi_None","hs_c_height_None","hs_c_weight_None","hs_wgtgain_None",
+                     "e3_gac_None","e3_sex_None","e3_yearbir_None","h_age_None",
+                     "h_cohort","h_edumc_None","h_native_None","h_parity_None",
+                     "hs_child_age_None")
+covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None")
+proteome.covariate.Names <- c("e3_sex_None","age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")
+
+
+S <- 7
+exposure.Names <- list(rep(0,S))
+exposure.Names[[1]] <- c("hs_as_m_Log2","hs_cd_m_Log2","hs_co_m_Log2","hs_cs_m_Log2",
+                          "hs_cu_m_Log2","hs_hg_m_Log2","hs_mn_m_Log2","hs_mo_m_Log2",
+                          "hs_pb_m_Log2")
+exposure.Names[[2]] <- c("hs_dde_madj_Log2","hs_ddt_madj_Log2","hs_hcb_madj_Log2","hs_pcb118_madj_Log2",
+                          "hs_pcb138_madj_Log2","hs_pcb153_madj_Log2","hs_pcb170_madj_Log2","hs_pcb180_madj_Log2")
+exposure.Names[[3]] <- c("hs_dep_madj_Log2","hs_detp_madj_Log2","hs_dmp_madj_Log2","hs_dmtp_madj_Log2")
+exposure.Names[[4]] <- c("hs_pbde153_madj_Log2","hs_pbde47_madj_Log2")
+exposure.Names[[5]] <- c("hs_pfhxs_m_Log2","hs_pfna_m_Log2","hs_pfoa_m_Log2","hs_pfos_m_Log2","hs_pfunda_m_Log2")
+exposure.Names[[6]] <- c("hs_bpa_madj_Log2","hs_bupa_madj_Log2","hs_etpa_madj_Log2","hs_mepa_madj_Log2",
+                          "hs_oxbe_madj_Log2","hs_prpa_madj_Log2","hs_trcs_madj_Log2")
+exposure.Names[[7]] <- c("hs_mbzp_madj_Log2","hs_mecpp_madj_Log2","hs_mehhp_madj_Log2","hs_mehp_madj_Log2",
+                          "hs_meohp_madj_Log2","hs_mep_madj_Log2","hs_mibp_madj_Log2","hs_mnbp_madj_Log2",
+                          "hs_ohminp_madj_Log2","hs_oxominp_madj_Log2")
+
+# models to run
+univariate <- T
+ridge <- F
+lasso <- F
+hier <- F
+
+```
+
+# Analysis of exposure/chemical mixtures within a single group of related exposures
+## The Question of interest:
+- How are mixtures of exposures for **`r exposure.group`** associated with the outcome **`r outcome.Name`**?
+  <br>
+
+## Effect estimate comparing profiles of exposures
+Often in assessing multiple exposures we have several questions or goals interest:  
+1) what is the independent effect of each exposure?
+2) do combinations of exposures act in a synergistic manner to increase risk? and,
+3) what is the combined effect when an individual is exposed to a mixture of compounds?
+
+### Outcome and linear predictor
+Using generalized linear regression models, we assume that the outcome, $Y$, is generated from a specific distribution of the exponential family and that the mean $\mu$ of this distribution is a function $\eta$ of the $P$ exposures defined in the design matrix $\boldsymbol{X}$. Specifically, $E[Y|\boldsymbol{X}] = \mu = g^{-1}(f(\boldsymbol{X}))$, where $g(.)$ is a link function connecting the function of the exposures $\eta$  Common link functions include the identify link for the normal distribution resulting in linear regression and a logit link for a binomial distribution resulting in logistic regression. Defined on the scale of the outcome as transformed by the link function, combinations of exposures act additivity. 
+
+$\eta = \boldsymbol{X\beta}$) to the mean of the distribution, $g(\mu) = \boldsymbol{X\beta}=\eta$.
+
+
+### Non-linear effects for each exposure - not sure we need to specify this
+
+### Interactions or deviations from additivity on the scale of the outcome
+
+### Model specification and model uncertainty
+
+### Contrasts between exposure profiles
+
+
+## Software for estimation  
+Although other software exists for estimation, linear and generalized linear models can be estimated in R (*lm* and *glm*) or for a g-prior model using *zlm* for linear regression and *BAS* for generalized linear models. For the analyses presented here we use JAGS for estimation as all models presented can be estimated using JAGs and JAGs/BUGs language allows for flexibility to specify more complex models.
+<br>
+
+## The Data
+The HELIX study represents a collaborative project across six established and ongoing longitudinal population-based birth cohort studies in six European countries (France, Greece, Lithuania, Norway, Spain, and the United Kingdom). HELIX used a multilevel study design with the entire study population totaling 31,472 mother–child pairs, recruited during pregnancy, in the six existing cohorts (first level); a subcohort of 1301 mother-child pairs where biomarkers, omics signatures and child health outcomes were measured at age 6-11 years (second level); and repeat-sampling panel studies with around 150 children and 150 pregnant women aimed at collecting personal exposure data (third level). For more details on the study design see Vrijheid, Slama, et al. EHP 2014. see https://www.projecthelix.eu/index.php/es/data-inventory for more information regarding the study.
+
+The specific data is from the Exposome Data Analysis Challege (https://www.isglobal.org/-/exposome-data-analysis-challenge). The Exposome dataset represents a real case scenario of exposome dataset (based on the HELIX project database) with multiple correlated variables (N>100 exposure variables) arising from general and personal environments at different time points, biological molecular data (multi-omics: DNA methylation, gene expression, proteins, metabolomics) and multiple clinical phenotypes. The population is drawn from a multi-center study which will represent the main confounding structure in the dataset.
+<br>
+  
+
+## Processing the Data
+```{r Inputing the Data, echo=TRUE}
+load("exposome.RData")
+load("proteome.Rdata")
+
+# Merge all data by ID
+d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
+d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
+proteome.d <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order
+d <- merge(x=d, y=proteome.d, by.x="ID", by.y="ID", all=T)
+#d <- d[complete.cases(d),]
+
+if(exposure.group!="All") {
+  exposure.index <- switch(exposure.group, 
+            "Metals"=1,
+            "Organochlorines"=2,
+            "Organophosphate pesticides"=3,
+            "PBDE"=4,
+            "PFAS"=5,
+            "Phenols"=6,
+            "Phthalates"=7)
+  exposure.Names <- unlist(exposure.Names[[exposure.index]]) # focus on single group
+}
+if(exposure.group=="All") { exposure.Names <- unlist(exposure.Names) } # treat all groups as a single group
+# create exposure matrix X and XtX matrix for g-prior
+X <- scale(as.matrix(d[,exposure.Names]), center=T, scale=T)
+
+# Process the proteomic data
+proteome.Names <- fData(proteome)$Prot_ID 
+W <- d[,proteome.Names]
+
+# Process the outcome
+Y <- d[,outcome.Name] # outcome
+if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+
+# Process the covariates
+U <- as.data.frame(d[,covariate.Names])
+U[,"h_cohort"] <- as.factor(U[,"h_cohort"])
+U[,"h_edumc_None"] <- as.factor(U[,"h_edumc_None"])
+U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
+#U <- scale(U, center=T, scale=F) # mean center
+
+# Process the covariates
+U.proteome <- as.data.frame(d[,proteome.covariate.Names])
+U.proteome <- model.matrix(as.formula(paste("~-1+", paste(c(proteome.covariate.Names), collapse="+"))), data=U.proteome)
+U.proteome <- d[,proteome.covariate.Names]
+#U <- scale(U, center=T, scale=F) # mean center
+
+
+# Other variables for analysis
+N <- nrow(d)
+Q <- ncol(U)
+P <- ncol(X)
+R <- ncol(W)
+
+```
+<br>
+
+## Analysis for `r exposure.group`: {.tabset}
+- Exposures include a total of `r P` exposures and include the following exposures: `r exposure.Names` 
+
+### Summary for each exposure
+```{r summmary statistics, echo=TRUE}
+summarytools::view(dfSummary(as.data.frame(X), style = 'grid',
+                               max.distinct.values = 10, plain.ascii =   FALSE, valid.col = FALSE, headings = FALSE), method = "render")
+
+```
+
+
+### Correlation of the exposures:<br>
+```{r cor.plot, echo=TRUE}
+cormat <- round(cor(X), 2)
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1))+
+  coord_fixed()+
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+
+```
+<br>
+
+# Approaches
+## Univariate Regression
+### Univariate Model:
+We first investigate the independent association of each of $P$ exposures on the outcome. thus for $p = {1,...,P}$ we fit the following model:
+
+$y_{i} \sim Bernoulli(\mu_{ip})$
+  
+$logit(\mu_{ip}) = \alpha_{p} + \beta_{p}X_{p} + \sum_Q{\delta_{qp}U_q}$
+  
+Each effect estimate $\beta_{p}$ is estimated by a maximum likelihood estimats (MLE), $\hat{\beta}$. Note that the $X_{p}$ are mean centered.
+
+```{r glm univariate model, echo=TRUE}
+if(univariate) {
+  univariate.results <- t(sapply(1:P, FUN=function(p) {  # using index p faciliate write
+    x <- X[,p]
+    reg <- glm(Y~x+U, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regresion
+    c.reg <- s.reg$coef["x",]             # select the coeficients for the exposure
+    write.table(t(c(exposure.Names[p], c.reg)), file="UnivariateResults.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  univariate.results <- data.frame(exposure.Names,univariate.results)
+}
+
+```
+
+### Univariate results: {.tabset}
+#### Univariate Table:
+```{r univariate table}
+if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE, col.names=c("Exposure","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+```
+
+#### Univariate Manhattan-like Plot:
+```{r univariate plot}
+neglog.pvalues <- -log10(univariate.results$Pr...z..)
+plot(1:nrow(univariate.results), neglog.pvalues, 
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value", xlab="")
+text(x=1:nrow(univariate.results), y=par("usr")[3]-0.1, xpd=NA,
+     labels=univariate.results$exposure.Names, adj=.9, srt=45, cex=.75)
+abline(h=-log10(0.05/nrow(univariate.results)), lty=2, lwd=2, col=2)
+```
+<br>
+
+## Ridge regression:
+### Ridge Model:
+To estimate the independent effect of each exposure, we  model all exposures jointly in a single regression model:
+
+$y_{i} \sim Bernoulli(\mu_{i})$
+  
+$logit(\mu_{i}) = \alpha + \sum_P{\beta_{p}X_{p}} + \sum_Q{\delta_{qp}U_q}$
+
+The $\beta$s are specified with a single normal prior with a joint variance: $\beta_{p} \sim N(0, \sigma^2)$. This approach is referred to as ridge regression. Posterior estimates $\tilde{\beta}$ are a weighted average between the MLE $\hat{\beta}$ obtained and the prior mean, $\bar{\beta}=0$:
+
+$\tilde{\beta}=W\bar{\beta} + (1-W)\hat{\beta}$ where the weight is a balance between the estimated uncertainty for the MLE $V_{\hat{\beta}}$, which reflects the information contained by the data, and the estimated common prior variance, $\sigma^{2}$: $W=V_{\hat{\beta}}/(\sigma^{2}+V_{\hat{\beta}})$. Thus, if the uncertainty in the MLE is large relative to estimated group variance, then the posterior estimate is shrunk towards zero. As precision increases, the posterior estimate will be weighted more towards the MLE estimates.
+
+Note that replacing the prior on the $\beta$s with a double exponential induces sparsity and is Bayesian implementation of the lasso model. A mixture prior between a normal and double exponential is similar to elastic net. 
+
+```{r ridge regression, echo=TRUE}
+if(ridge) {
+  ridge.fit <- cv.glmnet(x=X, y=Y, family="binomial", alpha=0)  # alpha=0 is for ridge
+  ridge.coef <- coef(ridge.fit, s = "lambda.min")
+}
+```
+
+### Ridge Results: {.tabset}
+#### Ridge Coefficients:
+```{r ridge coefficients}
+if(ridge) { print(ridge.coef) }
+```
+<br>
+
+## Analysis for Proteomics: {.tabset}
+- Proteomics include a total of `r R` proteomic measures with the following : `r proteome.Names` 
+
+### Summary for each proteomic feature
+```{r proteomics summary}
+summarytools::view(dfSummary(as.data.frame(W), style = 'grid',
+                               max.distinct.values = 10, plain.ascii =   FALSE, valid.col = FALSE, headings = FALSE), method = "render")
+```
+
+### Correlation of the proteomics:<br>
+```{r cor.plot proteomics, echo=TRUE}
+cormat <- round(cor(W, use="complete.obs"), 2)
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1))+
+  coord_fixed() #+ geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+
+```
+
+```{r glm univariate model proteome, echo=TRUE}
+if(univariate) {
+  #W.complete <- W[complete.cases(d),]
+  #Y.complete <- Y[complete.cases(d)]
+  #U.complete <- U.proteome[complete.cases(d),]
+  univariate.results <- t(sapply(1:R, FUN=function(p) {  # using index p faciliate write
+    w <- W[,p]
+    reg <- glm(Y~w+U.proteome, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regression
+    c.reg <- s.reg$coef["w",]             # select the coefficients
+    write.table(t(c(proteome.Names[p], c.reg)), file="UnivariateResultsProteome.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  univariate.results <- data.frame(proteome.Names,univariate.results)
+}
+
+```
+
+
