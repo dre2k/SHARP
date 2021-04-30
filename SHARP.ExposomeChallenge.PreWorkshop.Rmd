@@ -27,6 +27,8 @@ library(summarytools) # for summarizing variables
 library(tidyverse)
 library(glmnet)
 library(Biobase)
+library(gap)
+
 options(knitr.table.format = "html")
 knitr::opts_chunk$set(echo = TRUE)
 
@@ -342,6 +344,7 @@ if(elasticnet) { elasticnet.coef }
 ```
 <br>
 
+***
 
 # PROTEOME ANALYSIS
 ```{r Proteome: Data Analysis setup, echo=FALSE }
@@ -371,6 +374,7 @@ d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
 d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
 d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
 d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
+d <- d[complete.cases(d), ] # helps to facilitate analysis
 
 # Create exposure design matrix
 proteome.Names <- fData(proteome)$Prot_ID
@@ -384,7 +388,7 @@ if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
 
 # Create the covariate design matrix
 U <- as.data.frame(d[,covariate.Names])
-#U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
+U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
 #U <- scale(U, center=T, scale=F) # mean center
 
 # Other variables for analysis
@@ -425,8 +429,264 @@ ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
 ```
 <br>
 
+## Proteome: Statistical Approaches for Association Analysis
+### Univariate Regression
 
----
+```{r Proteome: Univariate model, echo=TRUE}
+if(univariate) {
+  univariate.results <- t(sapply(1:P, FUN=function(p) {  # using index p facilitate write
+    x <- X[,p]
+    reg <- glm(Y~x+U, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regression
+    c.reg <- s.reg$coef["x",]             # select the coefficients for the exposure
+    write.table(t(c(proteome.Names[p], c.reg)), file="ProteomeUnivariateResults.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  univariate.results <- data.frame(proteome.Names,univariate.results)
+}
+
+```
+
+#### Univariate results: {.tabset}
+##### Univariate Summary Table:
+```{r Proteome: Univariate table}
+if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE, col.names=c("Protein","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+```
+
+##### Univariate Manhattan Plot:
+```{r Proteome: Univariate plot}
+neglog.pvalues <- -log10(univariate.results$Pr...z..)
+plot(1:nrow(univariate.results), neglog.pvalues, 
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value", xlab="")
+text(x=1:nrow(univariate.results), y=par("usr")[3]-0.1, xpd=NA,
+     labels=univariate.results$proteome.Names, adj=.9, srt=45, cex=.75)
+abline(h=-log10(0.05/nrow(univariate.results)), lty=2, lwd=2, col=2)
+```
+<br>
+
+### Ridge regression:
+#### Ridge Model:
+
+```{r Proteome: Ridge Regression, echo=TRUE}
+if(ridge) {
+  ridge.cv <- cv.glmnet(x=X, y=Y, family="binomial", alpha=0)  # alpha=0 is for ridge
+  ridge.coef <- coef(ridge.cv, s = "lambda.min")
+  ridge.fit <- glmnet(x=X, y=Y, family="binomial", alpha=0)
+}
+```
+
+#### Ridge Results: {.tabset}
+##### Ridge Selection of $\lambda$ via Cross Validation
+```{r Proteome: Ridge Cross Validation}
+if(ridge) { plot(ridge.cv) }
+```
+
+##### Ridge Coefficient Shrinkage
+```{r Proteome: Ridge Shrinkage}
+if(ridge) { 
+  plot(ridge.fit, xvar="lambda", label=T)
+  abline(v=log(ridge.cv$lambda.min), lty=2, col="red")
+  abline(v=log(ridge.cv$lambda.1se), lty=2, col="green")
+}
+```
+
+##### Ridge Coefficients for the Selected Model
+```{r Proteome: Ridge coefficients}
+if(ridge) { ridge.coef }
+```
+
+<br>
+
+### LASSO regression:
+#### LASSO Model:
+
+```{r Proteome: LASSO Regression, echo=TRUE}
+if(lasso) {
+  lasso.cv <- cv.glmnet(x=X, y=Y, family="binomial", alpha=1)  # alpha=1 is for lasso
+  lasso.coef <- coef(lasso.cv, s = "lambda.min")
+  lasso.fit <- glmnet(x=X, y=Y, family="binomial", alpha=1)
+}
+```
+
+#### LASSO Results: {.tabset}
+##### LASSO Selection of $\lambda$ via Cross Validation
+```{r Proteome: LASSO Cross Validation}
+if(lasso) { plot(lasso.cv) }
+```
+
+##### LASSO Coefficient Shrinkage
+```{r Proteome: LASSO Shrinkage}
+if(lasso) { 
+  plot(lasso.fit, xvar="lambda", label=T)
+  abline(v=log(lasso.cv$lambda.min), lty=2, col="red")
+  abline(v=log(lasso.cv$lambda.1se), lty=2, col="green")
+}
+```
+
+##### LASSO Coefficients for the Selected Model
+```{r Proteome: LASSO coefficients}
+if(lasso) { lasso.coef }
+```
+<br>
+
+### Elastic net regression:
+#### Elastic net Model:
+
+```{r Proteome: Elastic net Regression, echo=TRUE}
+if(elasticnet) {
+  elasticnet.cv <- cv.glmnet(x=X, y=Y, family="binomial", alpha=0.5)  # alpha=0.5 is for elastic net
+  elasticnet.coef <- coef(elasticnet.cv, s = "lambda.min")
+  elasticnet.fit <- glmnet(x=X, y=Y, family="binomial", alpha=0.5)
+}
+```
+
+#### Elastic net Results: {.tabset}
+##### Elastic net Selection of $\lambda$ via Cross Validation
+```{r Proteome: Elastic net Cross Validation}
+if(elasticnet) { plot(elasticnet.cv) }
+```
+
+##### Elastic net Coefficient Shrinkage
+```{r Proteome: Elastic net Shrinkage}
+if(elasticnet) { 
+  plot(elasticnet.fit, xvar="lambda", label=T)
+  abline(v=log(elasticnet.cv$lambda.min), lty=2, col="red")
+  abline(v=log(elasticnet.cv$lambda.1se), lty=2, col="green")
+}
+```
+
+##### Elastic net Coefficients for the Selected Model
+```{r Proteome: Elastic net coefficients}
+if(elasticnet) { elasticnet.coef }
+```
+<br>
+
+***
+
+# GENOME ANALYSIS
+```{r Genome: Data Analysis setup, echo=FALSE }
+
+# Outcome
+outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+
+# Covariates
+covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None","ethn_PC1","ethn_PC2") 
+
+# Analysis models to run
+univariate <- T
+
+
+```
+
+## Genome: Processing the Data
+```{r Genome: Processing the Data, echo=TRUE}
+load("../exposome.RData")
+load("../proteome.RData")
+load("../genome.RData")
+
+# Merge all data by ID
+d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
+d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
+d <- data.frame(d, G)  # assumes that order of individuals in d and G are the same
+d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
+d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
+
+d <- d[complete.cases(d), ] # helps to facilitate analysis
+
+# Create  design matrix
+snp.Names <- paste("SNP", 1:ncol(G), sep=".")
+X <- d[,snp.Names]
+
+# Create the outcome variable
+Y <- d[,outcome.Name] # outcome
+if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+
+# Create the covariate design matrix
+U <- as.data.frame(d[,covariate.Names])
+U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
+#U <- scale(U, center=T, scale=F) # mean center
+
+# Other variables for analysis
+N <- nrow(d) # number of individuals in the analysis
+Q <- ncol(U)  # number of covariates in the matrix U
+P <- ncol(X)  # number of exposures in the matrix X
+
+```
+<br>
+
+## Genome: Descriptive Statistics {.tabset}  
+- The genome includes a total of `r P` single nucleotide polymorphisms (SNPs):  
+
+### Plot of Genetic Ancestry as Estimated by Prinicpal Components
+```{r Genome: PC plot, echo=TRUE}
+plot(d$ethn_PC1, d$ethn_PC2, pch=16, col=ifelse(d$h_ethnicity_cauc=="yes", 1, 2),
+     xlab="Component 1", ylab="Component 2")
+legend(x="topleft", legend=c("Caucasian", "Other"), col=c(1,2), pch=16)
+
+```
+
+### Correlation Matrix for Local Region of the Genome:
+```{r Genome: cor.plot, echo=TRUE}
+cormat <- round(cor(X[,1:(P/5)], use="complete.obs"), 2)
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank())+
+  labs(y= "SNPs", x = "SNPs")+
+  coord_fixed()
+
+```
+<br>
+
+## Genome: Statistical Approaches for Association Analysis
+### Univariate Regression
+
+```{r Genome: Univariate model, echo=TRUE}
+if(univariate) {
+  univariate.results <- t(sapply(1:P, FUN=function(p) {  # using index p facilitate write
+    x <- X[,p]
+    reg <- glm(Y~x+U, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regression
+    c.reg <- s.reg$coef["x",]             # select the coefficients for the exposure
+    write.table(t(c(snp.Names[p], c.reg)), file="GenomeUnivariateResults.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  univariate.results <- data.frame(snp.Names,univariate.results)
+}
+
+```
+
+#### Univariate results: {.tabset}
+##### Univariate Summary Table:
+```{r Genome: Univariate table}
+if(univariate) { kable(univariate.results[univariate.results$Pr...z..<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("Protein","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+```
+
+##### Univariate Manhattan Plot:
+```{r Genome: Univariate MH plot}
+neglog.pvalues <- -log10(univariate.results$Pr...z..)
+plot(1:nrow(univariate.results), neglog.pvalues, 
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value)", xlab="SNPs")
+abline(h=-log10(0.05/nrow(univariate.results)), lty=2, lwd=2, col=2)
+```
+
+##### Univariate QQ-Plot:
+```{r Genome: QQ-plot}
+pvalues <- univariate.results$Pr...z..
+r <- gcontrol2(pvalues, pch=16)
+lambda <- round(r$lambda,3)
+text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
+
+```
+
+<br>
 
 ```{r final clean up}
 options(warn=old.warn)
