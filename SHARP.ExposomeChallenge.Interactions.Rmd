@@ -1,0 +1,191 @@
+---
+title: 'SHARP Multiomics Workshop: Exposome Challenge Data: Interactions'
+author: "David Conti"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+---
+
+```{css, echo=FALSE}
+pre {
+  max-height: 200px;
+  overflow-y: auto;
+}
+```
+
+```{r setup, include=FALSE, echo=FALSE}
+library(knitr)
+library(reshape2)
+library(ggplot2)
+library(epiR)
+library(summarytools) # for summarizing variables
+library(tidyverse)
+library(glmnet)
+library(Biobase)
+library(gap)
+
+options(knitr.table.format = "html")
+knitr::opts_chunk$set(echo = TRUE)
+
+# folder for analysis
+setwd("~/Google Drive/My Drive/Class/SHARP.MultiomicWorkshop/ExposomeChallengeData/SHARP")
+
+# suppress warning messages for final rendering
+old.warn <- getOption("warn")
+options(warn=-1)
+
+```
+
+# SHARP MULTIOMICS WORKSHOP
+## Data Descriptions for Interactions
+We investiagate the GxE interactions for 
+
+
+# GxE Interaction ANALYSIS
+```{r GxE: Data Analysis setup, echo=FALSE }
+
+# Outcome
+outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+
+covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None","ethn_PC1","ethn_PC2") 
+
+# Exposure related
+exposure.Name <- "e3_asmokcigd_p_None"
+
+
+# Analysis models to run
+GxE.univariate <- T
+
+```
+
+## GxE: Overview
+
+### The Question of interest:
+- Is there effect heterogeneity for the association of **`r exposure.Name`** with the outcome **`r outcome.Name`** by germline genetics?
+  <br>
+
+### Interaction model
+
+## GxE: Processing the Data
+```{r GxE: Processing the Data, echo=TRUE}
+load("../exposome.RData")
+load("../proteome.RData")
+load("../genome.RData")
+
+# Merge all data by ID
+d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
+d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
+d <- data.frame(d, G)  # assumes that order of individuals in d and G are the same
+d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
+d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
+
+d <- d[complete.cases(d), ] # helps to facilitate analysis
+
+# Create  design matrix
+snp.Names <- paste("SNP", 1:ncol(G), sep=".")
+X <- d[,snp.Names]
+
+# Create the outcome variable
+Y <- d[,outcome.Name] # outcome
+if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+
+# exposure variable
+E <- d[,exposure.Name]
+
+# Create the covariate design matrix
+U <- as.data.frame(d[,covariate.Names])
+U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
+#U <- scale(U, center=T, scale=F) # mean center
+
+# Other variables for analysis
+N <- nrow(d) # number of individuals in the analysis
+Q <- ncol(U)  # number of covariates in the matrix U
+P <- ncol(X)  # number of SNPs in the matrix X
+
+```
+<br>
+
+
+## GxE: Descriptive Statistics {.tabset}  
+- The genome includes a total of `r P` single nucleotide polymorphisms (SNPs):  
+
+### Plot of Genetic Ancestry as Estimated by Prinicpal Components (included in PreWorkshop Lab)
+```{r Genome: PC plot, echo=TRUE}
+plot(d$ethn_PC1, d$ethn_PC2, pch=16, col=ifelse(d$h_ethnicity_cauc=="yes", 1, 2),
+     xlab="Component 1", ylab="Component 2")
+legend(x="topleft", legend=c("Caucasian", "Other"), col=c(1,2), pch=16)
+
+```
+
+### Correlation Matrix for Local Region of the Genome:
+```{r Genome: cor.plot, echo=TRUE}
+cormat <- round(cor(X[,1:(P/5)], use="complete.obs"), 2)
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank())+
+  labs(y= "SNPs", x = "SNPs")+
+  coord_fixed()
+
+```
+<br>
+
+## GxE: Statistical Approaches for Association Analysis
+### GxE Univariate Regression
+
+```{r GxE: Univariate model, echo=TRUE}
+if(GxE.univariate) {
+  int.results <- t(sapply(1:ncol(X), FUN=function(p) {  # using index p faciliate write
+    g <- X[,p]
+    reg <- glm(Y~g*E+U, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regression
+    c.reg <- s.reg$coef["g:E",]             # select the coefficients
+    write.table(t(c(paste("SNP", p, sep="."), c.reg)), file="IntResultsGenome.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  int.results <- data.frame(paste("E:SNP", 1:ncol(G), sep="."),int.results)
+  names(int.results)[1] <- "SNP.Names"
+}
+
+```
+
+#### GxE Univariate results: {.tabset}
+##### GxE Univariate Summary Table:
+```{r GxE: Univariate table}
+if(GxE.univariate) { kable(int.results[int.results$Pr...z..<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("E:SNP","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+```
+
+##### GxE Univariate Manhattan Plot:
+```{r GxE: Univariate MH plot}
+neglog.pvalues <- -log10(int.results$Pr...z..)
+plot(1:nrow(int.results), neglog.pvalues, 
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value)", xlab="SNPs")
+abline(h=-log10(0.05/nrow(int.results)), lty=2, lwd=2, col=2)
+```
+
+##### GxE Univariate QQ-Plot:
+```{r GxE: QQ-plot}
+pvalues <- int.results$Pr...z..
+r <- gcontrol2(pvalues, pch=16)
+lambda <- round(r$lambda,3)
+text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
+
+```
+
+<br>
+
+```{r final clean up}
+options(warn=old.warn)
+
+```
