@@ -43,7 +43,7 @@ options(warn=-1)
 
 # SHARP MULTIOMICS WORKSHOP
 ## Data Descriptions for Interactions
-We investiagate the GxE interactions for 
+We investigate... 
 
 
 # GxE Interaction ANALYSIS
