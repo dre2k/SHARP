@@ -1,0 +1,129 @@
+---
+title: 'Template for SHARP Multiomics Workshop'
+author: "Yinqi Zhao, David Conti"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+---
+
+```{css, echo=FALSE}
+pre {
+  max-height: 200px;
+  overflow-y: auto;
+}
+```
+
+```{r setup, include=FALSE, echo=FALSE}
+library(summarytools) # for summarizing variables
+library(factoextra) # elegant cluster visualziation tool based on ggplot2
+library(cluster)
+library(ggplot2)
+library(tidyverse)
+library(Biobase)
+library(mclust)
+options(knitr.table.format = "html")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Data Analysis setup, echo=FALSE }
+setwd("~/Documents/Study_USC/TA/SHARP/")
+```
+
+## 1. Goals
+1. Learn to conduct exploratory analysis
+2. Learn to choose the optimal number of clusters based on different criteria
+3. Apply different clustering methods in R.
+
+## 2. Exploratory analysis {.tabset}
+### 2.1 Data description
+The HELIX study represents a collaborative project across six established and ongoing longitudinal population-based birth cohort studies in six European countries (France, Greece, Lithuania, Norway, Spain, and the United Kingdom). HELIX used a multilevel study design with the entire study population totaling 31,472 mother–child pairs, recruited during pregnancy, in the six existing cohorts (first level); a subcohort of 1301 mother-child pairs where biomarkers, omics signatures and child health outcomes were measured at age 6-11 years (second level); and repeat-sampling panel studies with around 150 children and 150 pregnant women aimed at collecting personal exposure data (third level). For more details on the study design see Vrijheid, Slama, et al. EHP 2014. see https://www.projecthelix.eu/index.php/es/data-inventory for more information regarding the study.
+
+The specific data is from the Exposome Data Analysis Challege (https://www.isglobal.org/-/exposome-data-analysis-challenge). The Exposome dataset represents a real case scenario of exposome dataset (based on the HELIX project database) with multiple correlated variables (N>100 exposure variables) arising from general and personal environments at different time points, biological molecular data (multi-omics: DNA methylation, gene expression, proteins, metabolomics) and multiple clinical phenotypes. The population is drawn from a multi-center study which will represent the main confounding structure in the dataset.
+
+For this specific lab, we will focus on the proteomics dataset. This dataset contains 1170 individuals and 36 proteins (log-transformed) with annotation. The data is stored in an `ExpressionSet` object. After loading `Biobase` package from the Bioconductor, the expression level can be extracted by `fData(proteome)`. For student's convenience, we transform the original `ExpressionSet` into a `csv` file which is directly accessible for Excel.
+<br>
+
+
+### 2.2 Summary for each protein
+The expression level is log-transformed, most of them are normally distributed, except for C-peptide, FGR Basics, IL15 and EGF. These 4 proteins have two peaks and the distributions are not symmetric. 
+```{r message=FALSE}
+# for a better visualization, we randomly sample 100 obs from the data
+set.seed(123)
+dat = scale(read_csv("proteome.csv")) # scale the data for clustering analysis
+X = dat[sample(1:nrow(dat), 100), ]
+summarytools::view(dfSummary(X, style = 'grid', 
+                             max.distinct.values = 10, 
+                             plain.ascii = FALSE, 
+                             valid.col = FALSE, headings = FALSE), method = "render")
+```
+
+
+### 2.3 Distance matrix 
+In clustering methods, we measure similarity(or disimilarity) between the objects based on some metrics, referred as distance. Here we calculate distance between observations based on Euclidean distance. 
+```{r}
+X_dist <- get_dist(X, stand = TRUE, method = "euclidean")
+fviz_dist(X_dist, gradient = list(low = "blue", mid = "white", high = "red"), show_labels = FALSE)
+```
+
+
+
+## 3. K-means {.tabset}
+### 3.1 Determine the optimal number of clusters
+Partitioning methods divide observations into $K$ clusters, where $K$ is the number of clusters that needs to be pre-specified. One of the most popular partitioning algorithm is K-means clustering by James MacQueen. This method represent each cluster by the means of the data points belonging to the cluster. 
+
+We need to determine the optimal number of clusters, $K$, before running the K-means algorithm. Here we illustrate the use of Gap statistic developed by Tibshiani, Walther and Hastie from Stanford. Suppose we have $K$ clusters. Each cluster $C_k$ contains $n_k$ observations. The sum of within-cluster distances is given by
+$$D_k = \sum_{x_i, x_j \in C_k}|x_i - x_j|^2$$
+The normalized total sum of intra-cluster distances is defined as
+$$W_K = \sum_{k = 1}^K \frac{1}{2n_k}D_k $$
+
+The Gap statistic measures the difference between the observed standardized $W_K$ and a null reference, a distribution without any clustering structure. It is defined as
+$$\text{Gap}(K) = E \log W_K - \log W_K $$
+where $E \log W_K$ is calculated based on Bootstrap samples from the null distribution. The optimal value of $K$ is the smallest $K$ such that 
+$$\text{Gap}(K) \geq \text{Gap}(K + 1) - s_{K + 1}$$
+where $s_{K + 1}$ is the standard error of $E \log W_K$ obatined from the Bootstrap samples.
+
+```{r }
+fviz_nbclust(X, kmeans, method = "gap_stat", nboot, nboot = 40)
+```
+
+### 3.2 Apply K-means in R
+```{r}
+set.seed(123)
+km <- kmeans(X, 4)
+fviz_cluster(km, data = X, labelsize = 0,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+
+## 5. Hierarchical clustering
+Hierarchical clustering is another popular algorithm for clustering which doesn't require pre-specify the number of clusters. Hierarchical clustering starts by treating each observation as a separate cluster and then repeatedly identify and combine two clusters that are closest to each other. The result of hierarchical clustering is a dendrogram, a tree based graph showing the how (dis)similar two clusters are. Observations can be divided into different number of clusters corresponding to a desired similarity level. When applying hierarchical clustering method to the data, we need to choose suitable distance metric and linkage based statistical judgement.
+```{r}
+#  hierarchical clustering
+hc <- X %>%
+  dist(method = "euclidean") %>% # Compute dissimilarity matrix based on Euclidean space
+  hclust(method = "ward.D2")     # Use complete linkage
+
+# Visualize using factoextra
+# Cut in 4 groups and color by groups
+fviz_dend(hc, k = 4, # Cut in four groups
+          show_labels = FALSE,
+          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          )
+```
+
+## 6. Mclust
+Mclust is a model based clustering method. It assumes sample is draw from a finite multivariate Gaussian distribution. It allows flexible modeling of the variance-covariance structure. Like hierarchical clustering, mclust is also a agglomerative clustering algorithm.
+```{r}
+mc = Mclust(X)
+fviz_mclust_bic(mc)
+fviz_mclust(mc)
+```
