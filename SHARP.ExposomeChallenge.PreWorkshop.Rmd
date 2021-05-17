@@ -28,6 +28,8 @@ library(tidyverse)
 library(glmnet)
 library(Biobase)
 library(gap)
+library(factoextra)
+library(gplots)
 
 options(knitr.table.format = "html")
 knitr::opts_chunk$set(echo = TRUE)
@@ -56,7 +58,7 @@ The HELIX study represents a collaborative project across six established and on
 ```{r Exposome: Data Analysis setup, echo=FALSE }
 
 # Outcome
-outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+outcome.Name <- "e3_bw" #hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
 
 # Covariates
 # covariate.Names <- c("h_mbmi_None","hs_c_height_None","hs_c_weight_None","hs_wgtgain_None",
@@ -66,9 +68,9 @@ outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
 covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None")
 
 # Exposure related
-exposure.group <- "Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
+exposure.group <- "All" #Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
 
-# All potential exposures ategorized by groups
+# All potential exposures categorized by groups
 S <- 7
 exposure.Names <- list(rep(0,S))
 exposure.Names[[1]] <- c("hs_as_m_Log2","hs_cd_m_Log2","hs_co_m_Log2","hs_cs_m_Log2",
@@ -140,6 +142,7 @@ X <- scale(as.matrix(d[,exposure.Names]), center=T, scale=T)
 # Create the outcome variable
 Y <- d[,outcome.Name] # outcome
 if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+if(outcome.Name=="e3_bw") { Y <- ifelse(as.numeric(Y)<2500, 1, 0)}
 
 # Create the covariate design matrix
 U <- as.data.frame(d[,covariate.Names])
@@ -184,6 +187,25 @@ ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
 
 ```
 <br>
+
+### Hierarchical clustering on Exposures:
+```{r Exposome: hierarchical clustering, echo=TRUE }
+#  hierarchical clustering
+hc <- t(X) %>%
+  dist(method = "euclidean") %>% # Compute dissimilarity matrix based on Euclidean space
+  hclust(method = "ward.D2")     # Use complete linkage
+
+# Visualize using factoextra
+# Cut in groups and color by groups
+fviz_dend(hc, k = 7, # Cut in groups
+          show_labels = TRUE, cex=0.4,
+          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          )
+
+```
+
 
 ## Exposome: Statistical Approaches for Association Analysis
 ### Univariate Regression
@@ -428,6 +450,25 @@ ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
 
 ```
 <br>
+
+### Hierarchical clustering on Proteome:
+```{r Proteome: hierarchical clustering, echo=TRUE }
+#  hierarchical clustering
+hc <- t(X) %>%
+  dist(method = "euclidean") %>% # Compute dissimilarity matrix based on Euclidean space
+  hclust(method = "ward.D2")     # Use complete linkage
+
+# Visualize using factoextra
+# Cut in groups and color by groups
+fviz_dend(hc, k = 6, # Cut in groups
+          show_labels = TRUE, cex=0.4,
+          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          )
+
+```
+
 
 ## Proteome: Statistical Approaches for Association Analysis
 ### Univariate Regression
@@ -687,6 +728,155 @@ text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
 ```
 
 <br>
+
+# EXPOSOME AND PROTEOME ANALYSIS
+```{r Exposome and Proteome: Data Analysis setup, echo=FALSE }
+
+# Outcome
+outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+
+# Covariates
+covariate.Names <- c("e3_sex_None","age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")
+
+# Exposure related
+exposure.group <- "All" #Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
+
+# All potential exposures categorized by groups
+S <- 7
+exposure.Names <- list(rep(0,S))
+exposure.Names[[1]] <- c("hs_as_m_Log2","hs_cd_m_Log2","hs_co_m_Log2","hs_cs_m_Log2",
+                          "hs_cu_m_Log2","hs_hg_m_Log2","hs_mn_m_Log2","hs_mo_m_Log2",
+                          "hs_pb_m_Log2")
+exposure.Names[[2]] <- c("hs_dde_madj_Log2","hs_ddt_madj_Log2","hs_hcb_madj_Log2","hs_pcb118_madj_Log2",
+                          "hs_pcb138_madj_Log2","hs_pcb153_madj_Log2","hs_pcb170_madj_Log2","hs_pcb180_madj_Log2")
+exposure.Names[[3]] <- c("hs_dep_madj_Log2","hs_detp_madj_Log2","hs_dmp_madj_Log2","hs_dmtp_madj_Log2")
+exposure.Names[[4]] <- c("hs_pbde153_madj_Log2","hs_pbde47_madj_Log2")
+exposure.Names[[5]] <- c("hs_pfhxs_m_Log2","hs_pfna_m_Log2","hs_pfoa_m_Log2","hs_pfos_m_Log2","hs_pfunda_m_Log2")
+exposure.Names[[6]] <- c("hs_bpa_madj_Log2","hs_bupa_madj_Log2","hs_etpa_madj_Log2","hs_mepa_madj_Log2",
+                          "hs_oxbe_madj_Log2","hs_prpa_madj_Log2","hs_trcs_madj_Log2")
+exposure.Names[[7]] <- c("hs_mbzp_madj_Log2","hs_mecpp_madj_Log2","hs_mehhp_madj_Log2","hs_mehp_madj_Log2",
+                          "hs_meohp_madj_Log2","hs_mep_madj_Log2","hs_mibp_madj_Log2","hs_mnbp_madj_Log2",
+                          "hs_ohminp_madj_Log2","hs_oxominp_madj_Log2")
+
+# Analysis models to run
+univariate <- T
+
+
+```
+
+## Exposome and Proteome: Processing the Data
+```{r Exposome and Proteome: Processing the Data, echo=TRUE}
+load("../exposome.RData")
+load("../proteome.RData")
+
+# Merge all data by ID
+d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
+d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
+d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
+d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
+d <- d[complete.cases(d), ] # helps to facilitate analysis
+
+# Create exposure design matrix
+proteome.Names <- fData(proteome)$Prot_ID
+X <- d[,proteome.Names]
+# create exposure matrix X
+X <- scale(X, center=T, scale=T)
+
+# Create exposure design matrix
+if(exposure.group!="All") {
+  exposure.index <- switch(exposure.group, 
+            "Metals"=1,
+            "Organochlorines"=2,
+            "Organophosphate pesticides"=3,
+            "PBDE"=4,
+            "PFAS"=5,
+            "Phenols"=6,
+            "Phthalates"=7)
+  exposure.Names <- unlist(exposure.Names[[exposure.index]]) # focus on single group
+}
+if(exposure.group=="All") { exposure.Names <- unlist(exposure.Names) } # treat all groups as a single group
+# create exposure matrix X and XtX matrix for g-prior
+W <- scale(as.matrix(d[,exposure.Names]), center=T, scale=T)
+
+# Create the outcome variable
+Y <- d[,outcome.Name] # outcome
+if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+
+# Create the covariate design matrix
+U <- as.data.frame(d[,covariate.Names])
+U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
+#U <- scale(U, center=T, scale=F) # mean center
+
+# Other variables for analysis
+N <- nrow(d) # number of individuals in the analysis
+Q <- ncol(U)  # number of covariates in the matrix U
+P <- ncol(X)  # number of proteome features in the matrix X
+R <- ncol(W)  # number of exposome features in the matrix X
+
+```
+<br>
+
+## Exposome and Proteome Analysis: Statistical Approaches for Association Analysis
+### Univariate Regression
+
+```{r Exposome and Proteome: Univariate model, echo=TRUE}
+if(univariate) {
+  univariate.results <- {}
+  beta.results <- matrix(0, nrow=R, ncol=P)
+  p.results <- matrix(0, nrow=R, ncol=P)
+  for(r in 1:R) { # loop through exposures
+    w <- W[,r]
+    for(p in 1:P) { # loop through proteins
+      x <- X[,p]
+      reg <- glm(x~w+U, family=gaussian)
+      s.reg <- summary(reg)                 # get the summary for the regression
+      c.reg <- s.reg$coef["w",]             # select the coefficients for the exposure
+      r.reg <- c(exposure.Names[r], proteome.Names[p], c.reg)
+      write.table(t(r.reg), file="ExposomeProteomeUnivariateResults.txt", append=ifelse(p*r==1, F, T), quote=F, sep="\t", col.names=ifelse(p*r==1, T, F), row.names=F)
+      beta.results[r,p] <- as.numeric(r.reg["Estimate"])
+      p.results[r,p] <- as.numeric(r.reg["Pr(>|t|)"])
+      univariate.results <- rbind(univariate.results, r.reg)
+    }
+  }
+  univariate.results <- as.data.frame(univariate.results)
+  names(univariate.results) <- c("Exposure", "Proteome", names(univariate.results)[3:6])
+  beta.results <- as.data.frame(beta.results)
+  p.results <- as.data.frame(p.results)
+  names(beta.results) <- proteome.Names
+  names(p.results) <- proteome.Names
+  row.names(beta.results) <- exposure.Names
+  row.names(p.results) <- exposure.Names
+}
+
+```
+
+#### Exposome and Proteome: Univariate results: {.tabset}
+##### Univariate Summary Table:
+```{r Exposome and Proteome:: Univariate table}
+if(univariate) { kable(univariate.results[univariate.results[,"Pr(>|t|)"] <0.05,], digits=3, align="c", row.names=FALSE, col.names=c("Exposure", "Protein","Estimate", "SD","t Value", "P Value"))}
+```
+
+##### Univariate Manhattan Plot:
+```{r Exposome and Proteome:: Univariate MH plot}
+
+neglog.pvalues <- -log10(as.numeric(univariate.results[,"Pr(>|t|)"]))
+plot(1:nrow(univariate.results), neglog.pvalues, 
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value)", xlab="",
+     col=match(univariate.results$Exposure, exposure.Names))
+abline(h=-log10(0.05/nrow(univariate.results)), lty=2, lwd=2, col=2)
+axis(side=1, at=(1:R)*(P)-P*.5, labels=FALSE)
+text(x=(1:R)*(P), y=par("usr")[3]-0.1, xpd=NA,
+      labels=exposure.Names, adj=1.2, srt=45, cex=.6)
+
+```
+
+##### Heatmap:
+```{r Exposome and Proteome: heatmap}
+heatmap.2(x=as.matrix(beta.results), hclustfun=function(d) hclust(d, method = "ward.D2"), trace="none", cexRow =.5, cexCol = .5)
+
+```
+
 
 ```{r final clean up}
 options(warn=old.warn)
