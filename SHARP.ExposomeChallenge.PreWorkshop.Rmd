@@ -30,6 +30,9 @@ library(Biobase)
 library(gap)
 library(factoextra)
 library(gplots)
+library(MultiAssayExperiment)
+library(UpSetR)
+library(pls)
 
 options(knitr.table.format = "html")
 knitr::opts_chunk$set(echo = TRUE)
@@ -53,39 +56,84 @@ In addition, for the SHARP Multiomics Workshop, we simulated germline genetics d
 The HELIX study represents a collaborative project across six established and ongoing longitudinal population-based birth cohort studies in six European countries (France, Greece, Lithuania, Norway, Spain, and the United Kingdom). HELIX used a multilevel study design with the entire study population totaling 31,472 mother–child pairs, recruited during pregnancy, in the six existing cohorts (first level); a subcohort of 1301 mother-child pairs where biomarkers, omics signatures and child health outcomes were measured at age 6-11 years (second level); and repeat-sampling panel studies with around 150 children and 150 pregnant women aimed at collecting personal exposure data (third level). For more details on the study design see Vrijheid, Slama, et al. EHP 2014. see https://www.projecthelix.eu/index.php/es/data-inventory for more information regarding the study.
 <br>
 
+# DATA PROCESSING AND ORGANIZATION
+```{r Data Processing and Organization }
+load("../exposome.RData")
+load("../proteome.RData")
+load("../genome.RData")
+load("../metabol_serum.Rdata")
+load("../metabol_urine.Rdata")
+
+outdoor.exposures <- exposome[,c("ID", as.character(codebook$variable_name[codebook$domain=="Outdoor exposures"]))] %>% 
+  column_to_rownames("ID") %>% 
+  t() %>%
+  DataFrame()
+indoor.air <- exposome[,c("ID", as.character(codebook$variable_name[codebook$domain=="Indoor air"]))] %>% 
+  column_to_rownames("ID") %>% 
+  t() %>%
+  DataFrame()
+lifestyles <- exposome[,c("ID", as.character(codebook$variable_name[codebook$domain=="Lifestyles"]))] %>% 
+  column_to_rownames("ID") %>% 
+  t() %>%
+  DataFrame()
+chemicals <- exposome[,c("ID", as.character(codebook$variable_name[codebook$domain=="Chemicals"]))] %>% 
+  column_to_rownames("ID") %>% 
+  t() %>%
+  DataFrame()
+covariates <- covariates %>% 
+  column_to_rownames("ID") %>% 
+  t() %>%
+  DataFrame()
+phenotype <- phenotype %>% as.data.frame() # use as ColData for MultiAssayExperiment format
+row.names(phenotype) <- paste0("X", phenotype$ID)
+
+proteome.d <- proteome@assayData$exprs %>% DataFrame()
+proteome.cov <- proteome@phenoData@data
+proteome.cov <- proteome.cov[stats::complete.cases(proteome.cov),] %>% t() %>% DataFrame()
+
+metabol_urine.d <- metabol_urine@assayData$exprs %>% DataFrame()
+metabol_urine.cov <- metabol_urine@phenoData@data
+metabol_urine.cov <- metabol_urine.cov[stats::complete.cases(metabol_urine.cov),] %>% t() %>% DataFrame()
+
+metabol_serum.d <- metabol_serum@assayData$exprs %>% DataFrame()
+metabol_serum.cov <- metabol_serum@phenoData@data
+metabol_serum.cov <- metabol_serum.cov[stats::complete.cases(metabol_serum.cov),] %>% t() %>% DataFrame()
+
+
+helix_ma <- MultiAssayExperiment(
+  experiments= ExperimentList("outdoor.exposures"=outdoor.exposures,
+                              "indoor.air"=indoor.air,
+                              "lifestyles"=lifestyles,
+                              "exposome"=chemicals,
+                              "covariates"=covariates,
+                              "proteome"=proteome.d,
+                              "proteome.cov"=proteome.cov,
+                              "metabol_urine"=metabol_urine.d,
+                              "metabol_urine.cov"=metabol_urine.cov,
+                              "metabol_serum"=metabol_serum.d,
+                              "metabol_serum.cov"=metabol_serum.cov,
+                              "genome"=G), 
+  colData = phenotype)
+
+upsetSamples(helix_ma, nintersects = 10, )
+
+```
+
 
 # EXPOSOME ANALYSIS
 ```{r Exposome: Data Analysis setup, echo=FALSE }
 
 # Outcome
-outcome.Name <- "e3_bw" #hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who" "e3_bw" 
 
 # Covariates
-# covariate.Names <- c("h_mbmi_None","hs_c_height_None","hs_c_weight_None","hs_wgtgain_None",
-#                      "e3_gac_None","e3_sex_None","e3_yearbir_None","h_age_None",
-#                      "h_cohort","h_edumc_None","h_native_None","h_parity_None",
-#                      "hs_child_age_None")
 covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None")
 
 # Exposure related
-exposure.group <- "All" #Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
+exposure.group <- "Organochlorines" #Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
 
-# All potential exposures categorized by groups
-S <- 7
-exposure.Names <- list(rep(0,S))
-exposure.Names[[1]] <- c("hs_as_m_Log2","hs_cd_m_Log2","hs_co_m_Log2","hs_cs_m_Log2",
-                          "hs_cu_m_Log2","hs_hg_m_Log2","hs_mn_m_Log2","hs_mo_m_Log2",
-                          "hs_pb_m_Log2")
-exposure.Names[[2]] <- c("hs_dde_madj_Log2","hs_ddt_madj_Log2","hs_hcb_madj_Log2","hs_pcb118_madj_Log2",
-                          "hs_pcb138_madj_Log2","hs_pcb153_madj_Log2","hs_pcb170_madj_Log2","hs_pcb180_madj_Log2")
-exposure.Names[[3]] <- c("hs_dep_madj_Log2","hs_detp_madj_Log2","hs_dmp_madj_Log2","hs_dmtp_madj_Log2")
-exposure.Names[[4]] <- c("hs_pbde153_madj_Log2","hs_pbde47_madj_Log2")
-exposure.Names[[5]] <- c("hs_pfhxs_m_Log2","hs_pfna_m_Log2","hs_pfoa_m_Log2","hs_pfos_m_Log2","hs_pfunda_m_Log2")
-exposure.Names[[6]] <- c("hs_bpa_madj_Log2","hs_bupa_madj_Log2","hs_etpa_madj_Log2","hs_mepa_madj_Log2",
-                          "hs_oxbe_madj_Log2","hs_prpa_madj_Log2","hs_trcs_madj_Log2")
-exposure.Names[[7]] <- c("hs_mbzp_madj_Log2","hs_mecpp_madj_Log2","hs_mehhp_madj_Log2","hs_mehp_madj_Log2",
-                          "hs_meohp_madj_Log2","hs_mep_madj_Log2","hs_mibp_madj_Log2","hs_mnbp_madj_Log2",
-                          "hs_ohminp_madj_Log2","hs_oxominp_madj_Log2")
+if(exposure.group=="All") { exposure.Names <- as.character(codebook$variable_name[codebook$domain=="Chemicals"]) }
+if(exposure.group!="All") { exposure.Names <- as.character(codebook$variable_name[codebook$family==exposure.group]) }
 
 # Analysis models to run
 univariate <- T
@@ -116,28 +164,18 @@ $\eta = \boldsymbol{X\beta}$) to the mean of the distribution, $g(\mu) = \boldsy
 
 ## Exposome: Processing the Data
 ```{r Exposome: Processing the Data, echo=TRUE}
-load("../exposome.RData")
 
 # Merge all data by ID
-d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
-d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
+#d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
+#d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
+variables <- c(covariate.Names, exposure.Names)
+d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name) # 1) select variables but keep in MultiAssayExperiment format; 2) intersectionColumns selects only individuals with complete data; 3) wideFormat returns as a DataFrame
+
 
 # Create exposure design matrix
-if(exposure.group!="All") {
-  exposure.index <- switch(exposure.group, 
-            "Metals"=1,
-            "Organochlorines"=2,
-            "Organophosphate pesticides"=3,
-            "PBDE"=4,
-            "PFAS"=5,
-            "Phenols"=6,
-            "Phthalates"=7)
-  exposure.Names <- unlist(exposure.Names[[exposure.index]]) # focus on single group
-}
-if(exposure.group=="All") { exposure.Names <- unlist(exposure.Names) } # treat all groups as a single group
-# create exposure matrix X and XtX matrix for g-prior
-X <- scale(as.matrix(d[,exposure.Names]), center=T, scale=T)
-
+X <- as.data.frame(apply(d[,paste("exposome",exposure.Names,sep="_")],2,as.numeric))
+names(X) <- exposure.Names
+X <- scale(X, center=T, scale=T)
 
 # Create the outcome variable
 Y <- d[,outcome.Name] # outcome
@@ -145,16 +183,16 @@ if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
 if(outcome.Name=="e3_bw") { Y <- ifelse(as.numeric(Y)<2500, 1, 0)}
 
 # Create the covariate design matrix
-U <- as.data.frame(d[,covariate.Names])
-U[,"h_cohort"] <- as.factor(U[,"h_cohort"])
-U[,"h_edumc_None"] <- as.factor(U[,"h_edumc_None"])
-U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
-#U <- scale(U, center=T, scale=F) # mean center
+U <- as.data.frame(d[,paste("covariates",covariate.Names,sep="_")])
+names(U) <- covariate.Names
+U[,c("h_cohort","e3_sex_None","h_edumc_None")] <- lapply(U[,c("h_cohort","e3_sex_None","h_edumc_None")], factor)
+U[,c("h_mbmi_None", "h_age_None")] <- lapply(U[,c("h_mbmi_None", "h_age_None")], as.numeric)
+U <- model.matrix(as.formula(paste("~-1+", paste(covariate.Names, collapse="+"))), data=U)
 
 # Other variables for analysis
 N <- nrow(d) # number of individuals in the analysis
 Q <- ncol(U)  # number of covariates in the matrix U
-P <- ncol(X)  # number of expsoures in the matrix X
+P <- ncol(X)  # number of exposures in the matrix X
 
 ```
 <br>
@@ -199,7 +237,6 @@ hc <- t(X) %>%
 # Cut in groups and color by groups
 fviz_dend(hc, k = 7, # Cut in groups
           show_labels = TRUE, cex=0.4,
-          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
           color_labels_by_k = TRUE, # color labels by groups
           rect = TRUE # Add rectangle around groups
           )
@@ -236,7 +273,7 @@ if(univariate) {
 #### Univariate results: {.tabset}
 ##### Univariate Summary Table:
 ```{r Exposome: Univariate table}
-if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE, col.names=c("Exposure","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE, col.names=c("Exposure","Estimate", "SD","Z statistic", "P-value"))}
 ```
 
 ##### Univariate Manhattan Plot:
@@ -244,7 +281,7 @@ if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE,
 neglog.pvalues <- -log10(univariate.results$Pr...z..)
 plot(1:nrow(univariate.results), neglog.pvalues, 
      pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
-     ylab="-log(p-value", xlab="")
+     ylab="-log(p-value)", xlab="")
 text(x=1:nrow(univariate.results), y=par("usr")[3]-0.1, xpd=NA,
      labels=univariate.results$exposure.Names, adj=.9, srt=45, cex=.75)
 abline(h=-log10(0.05/nrow(univariate.results)), lty=2, lwd=2, col=2)
@@ -377,6 +414,8 @@ outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
 # Covariates
 covariate.Names <- c("e3_sex_None","age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")
 
+# Proteome
+proteome.Names <- fData(proteome)$Prot_ID
 
 # Analysis models to run
 univariate <- T
@@ -388,35 +427,31 @@ elasticnet <- T
 
 ## Proteome: Processing the Data
 ```{r Proteome: Processing the Data, echo=TRUE}
-load("../exposome.RData")
-load("../proteome.RData")
 
-# Merge all data by ID
-d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
-d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
-d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
-d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
-d <- d[complete.cases(d), ] # helps to facilitate analysis
+variables <- c(covariate.Names, proteome.Names)
+d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name) # 1) select variables but keep in MultiAssayExperiment format; 2) intersectionColumns selects only individuals with complete data; 3) wideFormat returns as a DataFrame
 
-# Create exposure design matrix
-proteome.Names <- fData(proteome)$Prot_ID
-X <- d[,proteome.Names]
-# create exposure matrix X
+# Create design matrix
+X <- as.data.frame(d[,paste("proteome",proteome.Names,sep="_")])
+names(X) <- proteome.Names
 X <- scale(X, center=T, scale=T)
 
 # Create the outcome variable
 Y <- d[,outcome.Name] # outcome
 if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+if(outcome.Name=="e3_bw") { Y <- ifelse(as.numeric(Y)<2500, 1, 0)}
 
 # Create the covariate design matrix
-U <- as.data.frame(d[,covariate.Names])
-U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
-#U <- scale(U, center=T, scale=F) # mean center
+U <- as.data.frame(d[,c(paste("covariates",covariate.Names[1],sep="_"), paste("proteome.cov",covariate.Names[2:length(covariate.Names)],sep="_"))])
+names(U) <- covariate.Names
+U[,c("e3_sex_None")] <- as.factor(U[,c("e3_sex_None")])
+U[,c("age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")] <- lapply(U[,c("age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")], as.numeric)
+U <- model.matrix(as.formula(paste("~-1+", paste(covariate.Names, collapse="+"))), data=U) 
 
 # Other variables for analysis
 N <- nrow(d) # number of individuals in the analysis
 Q <- ncol(U)  # number of covariates in the matrix U
-P <- ncol(X)  # number of expsoures in the matrix X
+P <- ncol(X)  # number of variables in the matrix X
 
 ```
 <br>
@@ -462,7 +497,6 @@ hc <- t(X) %>%
 # Cut in groups and color by groups
 fviz_dend(hc, k = 6, # Cut in groups
           show_labels = TRUE, cex=0.4,
-          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
           color_labels_by_k = TRUE, # color labels by groups
           rect = TRUE # Add rectangle around groups
           )
@@ -491,7 +525,7 @@ if(univariate) {
 #### Univariate results: {.tabset}
 ##### Univariate Summary Table:
 ```{r Proteome: Univariate table}
-if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE, col.names=c("Protein","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+if(univariate) { kable(univariate.results, digits=3, align="c", row.names=FALSE, col.names=c("Protein","Estimate", "SD","Z Statistic", "P-value"))}
 ```
 
 ##### Univariate Manhattan Plot:
@@ -614,6 +648,9 @@ outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
 # Covariates
 covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None","ethn_PC1","ethn_PC2") 
 
+# SNPs
+snp.Names <- paste("SNP", 1:1000, sep=".")
+
 # Analysis models to run
 univariate <- T
 
@@ -622,36 +659,31 @@ univariate <- T
 
 ## Genome: Processing the Data
 ```{r Genome: Processing the Data, echo=TRUE}
-load("../exposome.RData")
-load("../proteome.RData")
-load("../genome.RData")
-
-# Merge all data by ID
-d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
-d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
-d <- data.frame(d, G)  # assumes that order of individuals in d and G are the same
-d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
-d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
-
-d <- d[complete.cases(d), ] # helps to facilitate analysis
+# not recommended way of storing genomewide data
+variables <- c(covariate.Names, "h_ethnicity_cauc", row.names(helix_ma[["genome"]]))
+d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name) # 1) select variables but keep in MultiAssayExperiment format; 2) intersectionColumns selects only individuals with complete data; 3) wideFormat returns as a DataFrame
 
 # Create  design matrix
-snp.Names <- paste("SNP", 1:ncol(G), sep=".")
-X <- d[,snp.Names]
+X <- d[,grep("SNP", names(d))]
+names(X) <- snp.Names
+X <- as.matrix(X)
 
 # Create the outcome variable
 Y <- d[,outcome.Name] # outcome
 if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
 
 # Create the covariate design matrix
-U <- as.data.frame(d[,covariate.Names])
-U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
-#U <- scale(U, center=T, scale=F) # mean center
+U <- d[,c(paste0("covariates_", covariate.Names[1:5]), paste0("proteome.cov_", covariate.Names[6:7]))]
+names(U) <- covariate.Names
+U[,c("h_cohort","e3_sex_None","h_edumc_None")] <- lapply(U[,c("h_cohort","e3_sex_None","h_edumc_None")], factor)
+U[,c("h_mbmi_None", "h_age_None","ethn_PC1","ethn_PC2")] <- lapply(U[,c("h_mbmi_None", "h_age_None","ethn_PC1","ethn_PC2")], as.numeric)
+U <- model.matrix(as.formula(paste("~-1+", paste(covariate.Names, collapse="+"))), data=U) 
+
 
 # Other variables for analysis
 N <- nrow(d) # number of individuals in the analysis
 Q <- ncol(U)  # number of covariates in the matrix U
-P <- ncol(X)  # number of exposures in the matrix X
+P <- ncol(X)  # number of SNPs in the matrix X
 
 ```
 <br>
@@ -661,7 +693,7 @@ P <- ncol(X)  # number of exposures in the matrix X
 
 ### Plot of Genetic Ancestry as Estimated by Prinicpal Components
 ```{r Genome: PC plot, echo=TRUE}
-plot(d$ethn_PC1, d$ethn_PC2, pch=16, col=ifelse(d$h_ethnicity_cauc=="yes", 1, 2),
+plot(d$proteome.cov_ethn_PC1, d$proteome.cov_ethn_PC2, pch=16, col=ifelse(d$proteome.cov_h_ethnicity_cauc=="yes", 1, 2),
      xlab="Component 1", ylab="Component 2")
 legend(x="topleft", legend=c("Caucasian", "Other"), col=c(1,2), pch=16)
 
@@ -706,7 +738,7 @@ if(univariate) {
 #### Univariate results: {.tabset}
 ##### Univariate Summary Table:
 ```{r Genome: Univariate table}
-if(univariate) { kable(univariate.results[univariate.results$Pr...z..<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("Protein","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+if(univariate) { kable(univariate.results[univariate.results$Pr...z..<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("SNP","Estimate", "SD","Z Statistics", "P-value"))}
 ```
 
 ##### Univariate Manhattan Plot:
@@ -732,80 +764,46 @@ text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
 # EXPOSOME AND PROTEOME ANALYSIS
 ```{r Exposome and Proteome: Data Analysis setup, echo=FALSE }
 
-# Outcome
-outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
-
 # Covariates
-covariate.Names <- c("e3_sex_None","age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")
+covariate.Names <- c("e3_sex_None","h_cohort", "age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")
 
 # Exposure related
-exposure.group <- "All" #Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
+exposure.group <- "Organochlorines" #Organochlorines" # {"Metals", "Organochlorines", "Organophosphate pesticides", "PBDE", "PFAS", "Phenols", "Phthalates", "All"}
 
-# All potential exposures categorized by groups
-S <- 7
-exposure.Names <- list(rep(0,S))
-exposure.Names[[1]] <- c("hs_as_m_Log2","hs_cd_m_Log2","hs_co_m_Log2","hs_cs_m_Log2",
-                          "hs_cu_m_Log2","hs_hg_m_Log2","hs_mn_m_Log2","hs_mo_m_Log2",
-                          "hs_pb_m_Log2")
-exposure.Names[[2]] <- c("hs_dde_madj_Log2","hs_ddt_madj_Log2","hs_hcb_madj_Log2","hs_pcb118_madj_Log2",
-                          "hs_pcb138_madj_Log2","hs_pcb153_madj_Log2","hs_pcb170_madj_Log2","hs_pcb180_madj_Log2")
-exposure.Names[[3]] <- c("hs_dep_madj_Log2","hs_detp_madj_Log2","hs_dmp_madj_Log2","hs_dmtp_madj_Log2")
-exposure.Names[[4]] <- c("hs_pbde153_madj_Log2","hs_pbde47_madj_Log2")
-exposure.Names[[5]] <- c("hs_pfhxs_m_Log2","hs_pfna_m_Log2","hs_pfoa_m_Log2","hs_pfos_m_Log2","hs_pfunda_m_Log2")
-exposure.Names[[6]] <- c("hs_bpa_madj_Log2","hs_bupa_madj_Log2","hs_etpa_madj_Log2","hs_mepa_madj_Log2",
-                          "hs_oxbe_madj_Log2","hs_prpa_madj_Log2","hs_trcs_madj_Log2")
-exposure.Names[[7]] <- c("hs_mbzp_madj_Log2","hs_mecpp_madj_Log2","hs_mehhp_madj_Log2","hs_mehp_madj_Log2",
-                          "hs_meohp_madj_Log2","hs_mep_madj_Log2","hs_mibp_madj_Log2","hs_mnbp_madj_Log2",
-                          "hs_ohminp_madj_Log2","hs_oxominp_madj_Log2")
+if(exposure.group=="All") { exposure.Names <- as.character(codebook$variable_name[codebook$domain=="Chemicals"]) }
+if(exposure.group!="All") { exposure.Names <- as.character(codebook$variable_name[codebook$family==exposure.group]) }
+
+# Proteome
+proteome.Names <- fData(proteome)$Prot_ID
 
 # Analysis models to run
 univariate <- T
-
+pca.reg <- T
 
 ```
 
 ## Exposome and Proteome: Processing the Data
 ```{r Exposome and Proteome: Processing the Data, echo=TRUE}
-load("../exposome.RData")
-load("../proteome.RData")
+variables <- c(covariate.Names, exposure.Names, proteome.Names)
+d <- wideFormat(intersectColumns(helix_ma[variables, ,])) # 1) select variables but keep in MultiAssayExperiment format; 2) intersectionColumns selects only individuals with complete data; 3) wideFormat returns as a DataFrame
 
-# Merge all data by ID
-d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
-d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
-d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
-d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
-d <- d[complete.cases(d), ] # helps to facilitate analysis
 
-# Create exposure design matrix
-proteome.Names <- fData(proteome)$Prot_ID
-X <- d[,proteome.Names]
-# create exposure matrix X
+# Create  design matrix
+X <- as.data.frame(d[,paste("proteome",proteome.Names,sep="_")])
+names(X) <- proteome.Names
 X <- scale(X, center=T, scale=T)
 
 # Create exposure design matrix
-if(exposure.group!="All") {
-  exposure.index <- switch(exposure.group, 
-            "Metals"=1,
-            "Organochlorines"=2,
-            "Organophosphate pesticides"=3,
-            "PBDE"=4,
-            "PFAS"=5,
-            "Phenols"=6,
-            "Phthalates"=7)
-  exposure.Names <- unlist(exposure.Names[[exposure.index]]) # focus on single group
-}
-if(exposure.group=="All") { exposure.Names <- unlist(exposure.Names) } # treat all groups as a single group
-# create exposure matrix X and XtX matrix for g-prior
-W <- scale(as.matrix(d[,exposure.Names]), center=T, scale=T)
-
-# Create the outcome variable
-Y <- d[,outcome.Name] # outcome
-if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+W <- as.data.frame(apply(d[,paste("exposome",exposure.Names,sep="_")],2,as.numeric))
+names(W) <- exposure.Names
+W <- scale(W, center=T, scale=T)
 
 # Create the covariate design matrix
-U <- as.data.frame(d[,covariate.Names])
-U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
-#U <- scale(U, center=T, scale=F) # mean center
+U <- d[,c(paste0("covariates_", covariate.Names[1:2]), paste0("metabol_urine.cov_", covariate.Names[3:7]))]
+names(U) <- covariate.Names
+U[,c("h_cohort","e3_sex_None")] <- lapply(U[,c("h_cohort","e3_sex_None")], factor)
+U[,c("age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")] <- lapply(U[,c("age_sample_years","ethn_PC1","ethn_PC2","hs_dift_mealblood_imp","blood_sam4")], as.numeric)
+U <- model.matrix(as.formula(paste("~-1+", paste(covariate.Names, collapse="+"))), data=U) 
 
 # Other variables for analysis
 N <- nrow(d) # number of individuals in the analysis
@@ -877,6 +875,56 @@ heatmap.2(x=as.matrix(beta.results), hclustfun=function(d) hclust(d, method = "w
 
 ```
 
+### Principal components regression:
+```{r Exposome and Proteome: PCA Univaraite Regression model, echo=TRUE}
+if(pca.reg) {
+  pca.results <- {}
+  X.pca <- prcomp(X)
+  X.pc <- X.pca$x
+
+  W.pca <- prcomp(W)
+  W.pc <- W.pca$x
+  
+  beta.results <- matrix(0, nrow=R, ncol=P)
+  p.results <- matrix(0, nrow=R, ncol=P)
+  for(r in 1:ncol(W.pc)) { # loop through exposures
+    w <- W.pc[,r]
+    for(p in 1:ncol(X.pc)) { # loop through proteins
+      x <- X.pc[,p]
+      reg <- glm(x~w+U, family=gaussian)
+      s.reg <- summary(reg)                 # get the summary for the regression
+      c.reg <- s.reg$coef["w",]             # select the coefficients for the exposure
+      r.reg <- c(paste0("W.PC",r), paste0("X.PC",p), c.reg)
+      write.table(t(r.reg), file="ExposomeProteomePC.Results.txt", append=ifelse(p*r==1, F, T), quote=F, sep="\t", col.names=ifelse(p*r==1, T, F), row.names=F)
+      beta.results[r,p] <- as.numeric(r.reg["Estimate"])
+      p.results[r,p] <- as.numeric(r.reg["Pr(>|t|)"])
+      pca.results <- rbind(pca.results, r.reg)
+    }
+  }
+  pca.results <- as.data.frame(pca.results)
+  names(pca.results) <- c("Exposure", "Proteome", names(pca.results)[3:6])
+  beta.results <- as.data.frame(beta.results)
+  p.results <- as.data.frame(p.results)
+  names(beta.results) <- paste0("proteome.PC", 1:ncol(X.pc))
+  names(p.results) <- paste0("proteome.PC", 1:ncol(X.pc))
+  row.names(beta.results) <- paste0("exposome.PC", 1:ncol(W.pc))
+  row.names(p.results) <- paste0("exposome.PC", 1:ncol(W.pc))
+}
+
+```
+
+#### Exposome and Proteome: PCA Regression results: {.tabset}
+##### PCA Regression Summary Table:
+```{r Exposome and Proteome: PCA regression table}
+if(pca.reg) { kable(pca.results[pca.results[,"Pr(>|t|)"] <0.05,], digits=3, align="c", row.names=FALSE, col.names=c("Exposure", "Protein","Estimate", "SD","t Value", "P Value"))}
+```
+
+##### PCA Regression Summary Loadings:
+```{r r Exposome and Proteome:: PCA results}}
+round(W.pca$rotation[,"PC2"],2)
+round(X.pca$rotation[,"PC2"],2)
+
+```
 
 ```{r final clean up}
 options(warn=old.warn)
