@@ -19,14 +19,11 @@ pre {
 ```
 
 ```{r setup, include=FALSE, echo=FALSE}
+
+library(MultiAssayExperiment)
 library(knitr)
-library(reshape2)
 library(ggplot2)
-library(epiR)
-library(summarytools) # for summarizing variables
-library(tidyverse)
-library(glmnet)
-library(Biobase)
+library(reshape2)
 library(gap)
 
 options(knitr.table.format = "html")
@@ -57,6 +54,8 @@ covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edum
 # Exposure related
 exposure.Name <- "e3_asmokcigd_p_None"
 
+# SNPs
+snp.Names <- paste("SNP", 1:1000, sep=".")
 
 # Analysis models to run
 GxE.univariate <- T
@@ -73,39 +72,37 @@ GxE.univariate <- T
 
 ## GxE: Processing the Data
 ```{r GxE: Processing the Data, echo=TRUE}
-load("../exposome.RData")
-load("../proteome.RData")
-load("../genome.RData")
+load("../HELIX.MultiAssayExperiment.RData")
 
-# Merge all data by ID
-d <- merge(x=phenotype, covariates, by.x="ID", by.y="ID", all=T)
-d <- merge(x=d, y=exposome, by.x="ID", by.y="ID", all=T)
-d <- data.frame(d, G)  # assumes that order of individuals in d and G are the same
-d.proteome <- data.frame(proteome@phenoData@data, t((proteome@assayData$exprs))) # assumes data are in exactly same order -->
-d <- merge(x=d, y=d.proteome, by.x="ID", by.y="ID", all=T)
-
-d <- d[complete.cases(d), ] # helps to facilitate analysis
+# not recommended way of storing genomewide data
+variables <- c(covariate.Names, exposure.Name, "h_ethnicity_cauc", snp.Names)
+d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name) # 1) select variables but keep in MultiAssayExperiment format; 2) intersectionColumns selects only individuals with complete data; 3) wideFormat returns as a DataFrame
 
 # Create  design matrix
-snp.Names <- paste("SNP", 1:ncol(G), sep=".")
-X <- d[,snp.Names]
+X <- d[,grep("SNP", names(d))]
+names(X) <- snp.Names
+X <- as.matrix(X)
 
 # Create the outcome variable
 Y <- d[,outcome.Name] # outcome
 if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
 
-# exposure variable
-E <- d[,exposure.Name]
-
 # Create the covariate design matrix
-U <- as.data.frame(d[,covariate.Names])
-U <- model.matrix(as.formula(paste("~-1+", paste(c(covariate.Names), collapse="+"))), data=U)
-#U <- scale(U, center=T, scale=F) # mean center
+U <- d[,c(paste0("covariates_", covariate.Names[1:5]), paste0("proteome.cov_", covariate.Names[6:7]))]
+names(U) <- covariate.Names
+U[,c("h_cohort","e3_sex_None","h_edumc_None")] <- lapply(U[,c("h_cohort","e3_sex_None","h_edumc_None")], factor)
+U[,c("h_mbmi_None", "h_age_None","ethn_PC1","ethn_PC2")] <- lapply(U[,c("h_mbmi_None", "h_age_None","ethn_PC1","ethn_PC2")], as.numeric)
+U <- model.matrix(as.formula(paste("~-1+", paste(covariate.Names, collapse="+"))), data=U) 
+
 
 # Other variables for analysis
 N <- nrow(d) # number of individuals in the analysis
 Q <- ncol(U)  # number of covariates in the matrix U
 P <- ncol(X)  # number of SNPs in the matrix X
+
+# exposure variable
+E <- as.numeric(d[,grep(exposure.Name, names(d))])
+
 
 ```
 <br>
@@ -116,7 +113,7 @@ P <- ncol(X)  # number of SNPs in the matrix X
 
 ### Plot of Genetic Ancestry as Estimated by Prinicpal Components (included in PreWorkshop Lab)
 ```{r Genome: PC plot, echo=TRUE}
-plot(d$ethn_PC1, d$ethn_PC2, pch=16, col=ifelse(d$h_ethnicity_cauc=="yes", 1, 2),
+plot(d$proteome.cov_ethn_PC1, d$proteome.cov_ethn_PC2, pch=16, col=ifelse(d$proteome.cov_h_ethnicity_cauc=="yes", 1, 2),
      xlab="Component 1", ylab="Component 2")
 legend(x="topleft", legend=c("Caucasian", "Other"), col=c(1,2), pch=16)
 
@@ -149,12 +146,12 @@ if(GxE.univariate) {
     g <- X[,p]
     reg <- glm(Y~g*E+U, family=binomial)    # perform logistic regression
     s.reg <- summary(reg)                 # get the summary for the regression
-    c.reg <- s.reg$coef["g:E",]             # select the coefficients
+    c.reg <- as.numeric(s.reg$coef["g:E",])             # select the coefficients
     write.table(t(c(paste("SNP", p, sep="."), c.reg)), file="IntResultsGenome.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
     return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
   }, simplify=T))
-  int.results <- data.frame(paste("E:SNP", 1:ncol(G), sep="."),int.results)
-  names(int.results)[1] <- "SNP.Names"
+  int.results <- data.frame(paste("E:SNP", 1:ncol(X), sep="."),int.results)
+  names(int.results) <- c("E:SNP.Name","Estimate", "SD","Z.statistic", "P.value")
 }
 
 ```
@@ -162,12 +159,12 @@ if(GxE.univariate) {
 #### GxE Univariate results: {.tabset}
 ##### GxE Univariate Summary Table:
 ```{r GxE: Univariate table}
-if(GxE.univariate) { kable(int.results[int.results$Pr...z..<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("E:SNP","Estimate", "SD","Lower 95% CI", "Upper 95% CI"))}
+if(GxE.univariate) { kable(int.results[int.results$P.value<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("E:SNP","Estimate", "SD","Z statistic", "P value"))}
 ```
 
 ##### GxE Univariate Manhattan Plot:
 ```{r GxE: Univariate MH plot}
-neglog.pvalues <- -log10(int.results$Pr...z..)
+neglog.pvalues <- -log10(int.results$P.value)
 plot(1:nrow(int.results), neglog.pvalues, 
      pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
      ylab="-log(p-value)", xlab="SNPs")
@@ -176,7 +173,7 @@ abline(h=-log10(0.05/nrow(int.results)), lty=2, lwd=2, col=2)
 
 ##### GxE Univariate QQ-Plot:
 ```{r GxE: QQ-plot}
-pvalues <- int.results$Pr...z..
+pvalues <- int.results$P.value
 r <- gcontrol2(pvalues, pch=16)
 lambda <- round(r$lambda,3)
 text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)

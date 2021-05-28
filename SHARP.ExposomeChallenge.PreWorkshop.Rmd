@@ -33,6 +33,8 @@ library(gplots)
 library(MultiAssayExperiment)
 library(UpSetR)
 library(pls)
+library(corrplot)
+library(RColorBrewer)
 
 options(knitr.table.format = "html")
 knitr::opts_chunk$set(echo = TRUE)
@@ -210,18 +212,12 @@ summarytools::view(dfSummary(as.data.frame(X), style = 'grid',
 
 ### Correlation Matrix for the Exposures:
 ```{r Exposome: cor.plot, echo=TRUE}
-cormat <- round(cor(X, use="complete.obs"), 2)
-cormat[lower.tri(cormat)]<- NA
-melted_cormat <- melt(cormat)
-ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
-  geom_tile(color = "white")+
-  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
-                       midpoint = 0, limit = c(-1,1), space = "Lab", 
-                       name="Pearson\nCorrelation") +
-  theme_minimal()+ 
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
-                                   size = 12, hjust = 1))+
-  coord_fixed() + geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+cormat <- cor(X, use="complete.obs")
+corrplot(cormat, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"),
+         title = "",
+         addCoef.col = "black",
+         tl.cex=.5, number.cex=.5)
 
 ```
 <br>
@@ -469,19 +465,12 @@ summarytools::view(dfSummary(as.data.frame(X), style = 'grid',
 
 ### Correlation Matrix for the Proteome:
 ```{r Proteome: cor.plot, echo=TRUE}
-cormat <- round(cor(X, use="complete.obs"), 2)
-cormat[lower.tri(cormat)]<- NA
-melted_cormat <- melt(cormat)
-ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
-  geom_tile(color = "white")+
-  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
-                       midpoint = 0, limit = c(-1,1), space = "Lab", 
-                       name="Pearson\nCorrelation") +
-  theme_minimal()+ 
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
-                                   size = 6, hjust = 1))+
-  coord_fixed()
-  #+geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+cormat <- cor(X, use="complete.obs")
+corrplot(cormat, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"),
+         title = "",
+         #addCoef.col = "black",
+         tl.cex=.5, number.cex=.5)
 
 ```
 <br>
@@ -772,6 +761,7 @@ exposure.group <- "Organochlorines" #Organochlorines" # {"Metals", "Organochlori
 
 if(exposure.group=="All") { exposure.Names <- as.character(codebook$variable_name[codebook$domain=="Chemicals"]) }
 if(exposure.group!="All") { exposure.Names <- as.character(codebook$variable_name[codebook$family==exposure.group]) }
+exposure.Names <- exposure.Names[grep("cadj", exposure.Names)] # select only children measures
 
 # Proteome
 proteome.Names <- fData(proteome)$Prot_ID
@@ -815,7 +805,7 @@ R <- ncol(W)  # number of exposome features in the matrix X
 <br>
 
 ## Exposome and Proteome Analysis: Statistical Approaches for Association Analysis
-### Univariate Regression
+### Pairwise Univariate Regression Between Exposures and Proteins
 
 ```{r Exposome and Proteome: Univariate model, echo=TRUE}
 if(univariate) {
@@ -846,6 +836,11 @@ if(univariate) {
   row.names(p.results) <- exposure.Names
 }
 
+beta.results.long <- melt(as.matrix(beta.results))
+names(beta.results.long) <- c("Exposure", "Protein", "Effect")
+
+beta.pca <- prcomp(beta.results, scale = TRUE)
+
 ```
 
 #### Exposome and Proteome: Univariate results: {.tabset}
@@ -869,60 +864,60 @@ text(x=(1:R)*(P), y=par("usr")[3]-0.1, xpd=NA,
 
 ```
 
+##### Effects by Exposure and Protein
+```{r Exposome and Proteome: Effects by Exposure and Protein }
+
+ggplot(beta.results.long, 
+       aes(fill=Exposure, y = Effect, x = Protein)) + 
+  geom_bar(position="dodge", stat="identity") + 
+  ggtitle("Title") +
+  facet_wrap(~Protein) +
+  facet_grid(rows = vars(Exposure)) + 
+  xlab("") +
+  ylab("Effect") + 
+  theme(text = element_text(size=1),
+        axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   hjust = 1, size=7),
+        axis.text.y = element_text(size=10),
+        legend.title = element_blank(),
+        legend.text = element_text(size=10))
+
+```
+
+
 ##### Heatmap:
 ```{r Exposome and Proteome: heatmap}
 heatmap.2(x=as.matrix(beta.results), hclustfun=function(d) hclust(d, method = "ward.D2"), trace="none", cexRow =.5, cexCol = .5)
 
 ```
 
-### Principal components regression:
-```{r Exposome and Proteome: PCA Univaraite Regression model, echo=TRUE}
-if(pca.reg) {
-  pca.results <- {}
-  X.pca <- prcomp(X)
-  X.pc <- X.pca$x
+##### PCA: Scree Plot
+```{r Exposome and Proteome: PCA Scree Plot}
 
-  W.pca <- prcomp(W)
-  W.pc <- W.pca$x
-  
-  beta.results <- matrix(0, nrow=R, ncol=P)
-  p.results <- matrix(0, nrow=R, ncol=P)
-  for(r in 1:ncol(W.pc)) { # loop through exposures
-    w <- W.pc[,r]
-    for(p in 1:ncol(X.pc)) { # loop through proteins
-      x <- X.pc[,p]
-      reg <- glm(x~w+U, family=gaussian)
-      s.reg <- summary(reg)                 # get the summary for the regression
-      c.reg <- s.reg$coef["w",]             # select the coefficients for the exposure
-      r.reg <- c(paste0("W.PC",r), paste0("X.PC",p), c.reg)
-      write.table(t(r.reg), file="ExposomeProteomePC.Results.txt", append=ifelse(p*r==1, F, T), quote=F, sep="\t", col.names=ifelse(p*r==1, T, F), row.names=F)
-      beta.results[r,p] <- as.numeric(r.reg["Estimate"])
-      p.results[r,p] <- as.numeric(r.reg["Pr(>|t|)"])
-      pca.results <- rbind(pca.results, r.reg)
-    }
-  }
-  pca.results <- as.data.frame(pca.results)
-  names(pca.results) <- c("Exposure", "Proteome", names(pca.results)[3:6])
-  beta.results <- as.data.frame(beta.results)
-  p.results <- as.data.frame(p.results)
-  names(beta.results) <- paste0("proteome.PC", 1:ncol(X.pc))
-  names(p.results) <- paste0("proteome.PC", 1:ncol(X.pc))
-  row.names(beta.results) <- paste0("exposome.PC", 1:ncol(W.pc))
-  row.names(p.results) <- paste0("exposome.PC", 1:ncol(W.pc))
-}
+fviz_eig(beta.pca)
+
 
 ```
 
-#### Exposome and Proteome: PCA Regression results: {.tabset}
-##### PCA Regression Summary Table:
-```{r Exposome and Proteome: PCA regression table}
-if(pca.reg) { kable(pca.results[pca.results[,"Pr(>|t|)"] <0.05,], digits=3, align="c", row.names=FALSE, col.names=c("Exposure", "Protein","Estimate", "SD","t Value", "P Value"))}
+##### PCA: Proteins
+```{r Exposome and Proteome: PCA Protein Plot} 
+fviz_pca_var(beta.pca,
+             title="PCA by Protein Contribution",
+             col.var = "contrib", # Color by proportional amount to the PC
+             gradient.cols = c("green", "blue", "red"),
+             repel = TRUE     # Avoid text overlapping
+             )
+
 ```
 
-##### PCA Regression Summary Loadings:
-```{r r Exposome and Proteome:: PCA results}}
-round(W.pca$rotation[,"PC2"],2)
-round(X.pca$rotation[,"PC2"],2)
+##### PCA: Exposures
+```{r Exposome and Proteome: PCA Exposure Plot} 
+fviz_pca_ind(beta.pca,
+             title="PCA by Exposure Contribution",
+             col.ind = "cos2", # Color by total PC amount for each "individual"
+             gradient.cols = c("green", "blue", "red"),
+             repel = TRUE     # Avoid text overlapping
+             )
 
 ```
 
