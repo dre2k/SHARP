@@ -1,0 +1,118 @@
+---
+title: 'SHARP Multi-omics Workshop: Mediation Analysis'
+author: "Yinqi Zhao, David Conti"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+---
+
+```{css, echo=FALSE}
+pre {
+  max-height: 200px;
+  overflow-y: auto;
+}
+```
+
+```{r setup, include=FALSE, echo=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(Biobase)
+options(knitr.table.format = "html")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## 0. Introduction to Mediation Analysis
+Previously, we studied how to analyze and interpret the association between exposure and outcome of interest. However, statistical association sometimes is not enough to fully address the research question. For example, if we are studying how environmental exposure, say exposure to organochlorines (a chemical compound in pesticides), influences obesity in children, we are increasingly interested in the mechanisms behind the statistical association. In other words, we want to understand how organochlorines (independent variable) exert influence to obesity (dependent variable). Insulin is a well known peptide hormone which regulates the metabolism of carbohydrates and fats in human body and is directly related to obesity based on experimental evidence. If we believe insulin will explain the biological process (mechanism) between exposure and outcome, our research question then becomes
+
+* Does exposure to organochlorine lead to deviant insulin level in children which ultimately leads to obesity?
+
+Such question indicates a chain of relations where the independent variable affects the outcome through a third variable called mediator. Of course, the mediator is not restricted to biological factor. It can be psychological, social, environmental or even political variables. The standard statistical framework for answering the question above is called **mediation analysis**. In short, mediation analysis is a collection of regression models fitted on different combinations of exposure, outcome and mediator. Baron and Kenny (1986) outlined the basic steps for the classical framework of mediation analysis. For better illustration of mediation analysis, we first define some notations and concept.
+
+### Notation and Definition 
+1. $X$: Exposure (independent variable)
+2. $Y$: Outcome (dependent variable)
+3. $M$: Mediator (a third variable which explains the mechanism of statistical association between $X$ and $Y$)
+4. Total effect (TE): the statistical association of $X$ on $Y$. TE can be partitioned into direct effect and indirect effect.
+5. Indirect effect (IDE): the statistical association of $X$ on $Y$ transmitted through $M$.
+6. Direct effect (DE): the variance of $Y$ in TE that cannot be explained by IDE
+
+The rest of the tutorial is organized as the following sections: (1) simple mediation analysis based on linear regression; (2) extension of simple mediation model to multiple mediators; (3) other advanced mediation analysis methods, including latent mediation model and high dimensional mediation model.
+
+## 1. Simple Mediation Analysis
+To start with, we introduce mediation analysis framework based on linear regression, although the idea can be naturally extended to generalized linear regression. The mediation analysis can be expressed in terms of statistical language, which is illustrated below. 
+![illustration of simple mediation framework](fig1_simple-mediation.png)
+Here $a$ and $b$ represent the coefficients of the associations between exposure and mediator and between mediator and outcome, respectively. The product of $a$ and $b$ is referred as IDE. The direct effect, DE, is the coefficient $c$. Following the basic step suggested by Baron and Kenny (1986), the mediation analysis consists of three steps (regression models):
+
+1. $X \rightarrow Y$
+2. $X \rightarrow M$
+3. $X + M \rightarrow Y$
+
+We will go through each step by using the example question: whether insulin level mediates the association between exposure to organochlorine and obesity in children?
+```{r}
+dat = read_csv("~/Documents/Research/exposome_data_challenge/data/dat_organochlorines.csv")
+X = dat$hs_hcb_cadj_Log2
+M = dat$INSULIN
+Y = dat$hs_zbmi_who
+dat1 = data.frame(X = X, M = M, Y = Y)
+```
+
+
+### Step 1: Total Effect
+The first step is to analyze the total effect. The regression model is written as
+$$
+Y = c_0 + cX + \epsilon
+$$
+where $\epsilon$ represents the normally distributed error. We want to investigate whether $X$ significantly affects $Y$. 
+```{r}
+model_1 = lm(Y ~ X, data = dat1)
+summary(model_1)
+```
+The exposure to organochlorine significantly associated with BMI of children, measured in BMI z-score. Although this is what Baron and Kenny originally proposed for mediation analysis, however, this step is controversial. Shrout and Bolder (2002) argue that we can still detect mediation effect even the total effect is not significant. Now in practice, the first step of mediation analysis is used as reference for researchers to get a sense of the overall association. We will move forward with mediation analysis no matter $c$ (TE) is significant or not.
+
+### Step 2: Mediator Model
+The model we fit in the second step is called **mediator model**, specifically, it is 
+$$
+M = a_0 + aX + \epsilon
+$$
+Still, $\epsilon$ represents the random error. If $X$ is not significantly associated with $M$, then $M$ is just a third variable instead of a mediator which explains the mechanism between $X$ and $Y$. 
+```{r}
+model_2 = lm(M ~ X, data = dat1)
+summary(model_2)
+```
+
+### Step 3: Outcome Model
+The model we fit in step 3 is called **outcome model**, including both exposure $X$ and mediator $M$.
+$$
+Y = b_0 + c'X + bM + \epsilon
+$$
+What we we are interested in is to compare $c'$ here to $c$ in the model fitted in step 1. If $X$ influences $Y$ through $M$, by introducing $M$ in the outcome model, the effect of $X$ on $Y$ will become weaker or even disappear. If the effect of $X$ gets weaker, we detect **partial mediation effect**. If it disappears, we detect **fully mediation** effect. Here disappearance refers to statistical non-significance.
+```{r}
+model_3 = lm(Y ~ X + M, data = dat1)
+summary(model_3)
+```
+
+In our example, the coefficient of $X$ (exposure to organochlorine) and $M$ (insulin) are both significant in the outcome model. Besides, the effect of $X$ decreases from -0.34 to -0.27, so a partial mediation effect is detected. Once we observe the evidence of mediation effect, we want to conduct inference on the mediation effect. This is conveniently done by an R package called `mediation`.
+
+### Step 4: Causal Mediation Analysis
+```{r}
+library(mediation)
+result_simple_mediation = mediate(model_2, model_3, treat = "X", mediator = "M", boot = T)
+```
+The main function in `mediation` is `mediate()`. Two models are required to conduct causal mediation analysis in `mediate()` (corresponding to our conclusion in step 1, even TE is not necessary to detect mediation effect): the first model is the mediation model obtained from step 2 and the second is the outcome model from step 3. By setting `boot = T`, we use bootstrapping method to generate confidence interval for mediation effect. It takes some time to run the code because bootstrap is a replicated process of drawing sample with replacement from the original data and then  conducting mediation analysis based on the new sample. By default, 1000 replications are used to build the confidence interval for our analysis.
+```{r}
+summary(result_simple_mediation)
+```
+
+The total effect is the coefficient of $X$ in step 1: $X \rightarrow Y$. The direct effect (ADE) is $c'$ in the outcome model obtained from step 3. The mediation effect (ACME) is the product of coefficient $a$ in step 2 and the coefficient $b$ in step 3. It also equals the total effect $c$ minus the direct effect $c - c'$. `Prop.Mediated` represents 20% of variance in $Y$ is explained through the mediation effect. Overall, we detect a significant mediation effect (-0.0698, p , 0.01) of insulin between exposure to organochlorine and childhood obesity.
+
+
+## Reference
+1. Baron, R.M. and Kenny, D.A., 1986. The moderator–mediator variable distinction in social psychological research: Conceptual, strategic, and statistical considerations. Journal of personality and social psychology, 51(6), p.1173.
+2. Shrout, P.E. and Bolger, N., 2002. Mediation in experimental and nonexperimental studies: new procedures and recommendations. Psychological methods, 7(4), p.422.
