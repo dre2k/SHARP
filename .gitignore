@@ -2,3 +2,8 @@
 proteome.rdata
 .Rhistory
 Cadiou_2021.pdf
+.Rproj.user
+data
+SHARP.ExposomeChallenge.Interactions.AK_cache
+SHARP.ExposomeChallenge.Interactions.AK_files
+IntResultsGenome.txt

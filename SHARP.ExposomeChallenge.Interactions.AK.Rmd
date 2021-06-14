@@ -1,0 +1,523 @@
+---
+title: 'SHARP Multiomics Workshop: Exposome Challenge Data: Interactions'
+author: "David Conti"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: hide
+  pdf_document: default
+---
+
+```{css, echo=FALSE}
+pre {
+  max-height: 200px;
+  overflow-y: auto;
+}
+```
+
+```{r setup, include=FALSE, echo=FALSE}
+library(MultiAssayExperiment)
+library(knitr)
+library(ggplot2)
+library(reshape2)
+library(gap)
+library(kableExtra)
+
+options(knitr.table.format = "html")
+knitr::opts_chunk$set(echo = TRUE)
+
+# folder for analysis
+# setwd("~/Google Drive/My Drive/SHARP.MultiomicsWorkshop.USC.share/")
+
+# suppress warning messages for final rendering
+old.warn <- getOption("warn")
+options(warn=-1)
+
+```
+
+
+NEED TO EXPLAIN DATA SOURCES, BACKGROUND, etc
+
+
+
+
+
+# SHARP MULTIOMICS WORKSHOP
+## Data Descriptions for Interactions
+We investigate... 
+
+
+# GxE Interaction ANALYSIS
+```{r GxE: Data Analysis setup, echo=FALSE }
+
+# Outcome
+outcome.Name <- "hs_bmi_c_cat" # "hs_asthma" # "hs_bmi_c_cat" "hs_zbmi_who"
+
+covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None","ethn_PC1","ethn_PC2") 
+
+# Exposure related
+exposure.Name <- "e3_asmokcigd_p_None"
+
+# SNPs
+snp.Names <- paste("SNP", 1:1000, sep=".")
+
+# Analysis models to run
+GxE.univariate <- T
+
+```
+
+## GxE: Overview
+
+### The Question of interest:
+- Is there effect heterogeneity for the association of **`r exposure.Name`** with the outcome **`r outcome.Name`** by germline genetics?
+  <br>
+
+### Interaction model
+
+## GxE: Processing the Data
+```{r GxE: Processing the Data, echo=TRUE, cache = T}
+load("~/Google Drive/My Drive/SHARP.MultiomicsWorkshop.USC.share/data/HELIX.MultiAssayExperiment.RData")
+
+# not recommended way of storing genomewide data
+variables <- c(covariate.Names, exposure.Name, "h_ethnicity_cauc", snp.Names)
+# 1) select variables but keep in MultiAssayExperiment format; 2) intersectionColumns selects only individuals with complete data; 3) wideFormat returns as a DataFrame
+d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name) 
+
+
+# Create  design matrix
+X <- d[,grep("SNP", names(d))]
+names(X) <- snp.Names
+X <- as.matrix(X)
+
+# Create the outcome variable
+Y <- d[,outcome.Name] # outcome
+if(outcome.Name=="hs_bmi_c_cat") { Y <- ifelse(as.numeric(Y)>=3, 1, 0)}
+
+# Create the covariate design matrix
+U <- d[,c(paste0("covariates_", covariate.Names[1:5]), paste0("proteome.cov_", covariate.Names[6:7]))]
+names(U) <- covariate.Names
+U[,c("h_cohort","e3_sex_None","h_edumc_None")] <- lapply(U[,c("h_cohort","e3_sex_None","h_edumc_None")], factor)
+U[,c("h_mbmi_None", "h_age_None","ethn_PC1","ethn_PC2")] <- lapply(U[,c("h_mbmi_None", "h_age_None","ethn_PC1","ethn_PC2")], as.numeric)
+U <- model.matrix(as.formula(paste("~-1+", paste(covariate.Names, collapse="+"))), data=U) 
+U = U[,-which(colnames(U) == "e3_sex_Nonemale")] 
+
+
+
+# Other variables for analysis
+N <- nrow(d) # number of individuals in the analysis
+Q <- ncol(U)  # number of covariates in the matrix U
+P <- ncol(X)  # number of SNPs in the matrix X
+
+# exposure variable
+# E <- as.numeric(d[,grep(exposure.Name, names(d))])
+E <- as.numeric(d[,grep(exposure.Name, names(d))])      #what David has in his rmd example
+   E <- ifelse(E > 0,1,0)        #what I added since this is the E he used to simulate the gxe data
+
+```
+<br>
+
+
+## GxE: Descriptive Statistics {.tabset}
+- The genome includes a total of `r P` single nucleotide polymorphisms (SNPs):
+
+### Plot of Genetic Ancestry as Estimated by Prinicpal Components (included in PreWorkshop Lab)
+```{r Genome: PC plot, echo=TRUE}
+plot(d$proteome.cov_ethn_PC1, d$proteome.cov_ethn_PC2, pch=16, col=ifelse(d$proteome.cov_h_ethnicity_cauc=="yes", 1, 2),
+     xlab="Component 1", ylab="Component 2")
+legend(x="topleft", legend=c("Caucasian", "Other"), col=c(1,2), pch=16)
+
+```
+
+### Correlation Matrix for Local Region of the Genome:
+```{r Genome: cor.plot, echo=TRUE}
+cormat <- round(cor(X[,1:(P/5)], use="complete.obs"), 2)
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1), space = "Lab",
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank())+
+  labs(y= "SNPs", x = "SNPs")+
+  coord_fixed()
+
+```
+<br>
+
+## GxE: Statistical Approaches for Association Analysis
+### GxE Univariate Regression
+
+```{r GxE: Univariate model, echo=TRUE}
+if(GxE.univariate) {
+  int.results <- t(sapply(1:ncol(X), FUN=function(p) {  # using index p faciliate write
+    g <- X[,p]
+    reg <- glm(Y~g*E+U, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regression
+    c.reg <- as.numeric(s.reg$coef["g:E",])             # select the coefficients
+    # write.table(t(c(paste("SNP", p, sep="."), c.reg)), file="IntResultsGenome.txt", append=ifelse(p==1, F, T), quote=F, sep="\t", col.names=ifelse(p==1, T, F), row.names=F)
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  int.results <- data.frame(paste("E:SNP", 1:ncol(X), sep="."),int.results)
+  names(int.results) <- c("E:SNP.Name","Estimate", "SD","Z.statistic", "P.value")
+}
+
+```
+
+#### GxE Univariate results: {.tabset}
+##### GxE Univariate Summary Table:
+```{r GxE: Univariate table}
+if(GxE.univariate) { kable(int.results[int.results$P.value<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("E:SNP","Estimate", "SD","Z statistic", "P value"))}
+```
+
+##### GxE Univariate Manhattan Plot:
+```{r GxE: Univariate MH plot}
+neglog.pvalues <- -log10(int.results$P.value)
+plot(1:nrow(int.results), neglog.pvalues,
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value)", xlab="SNPs")
+abline(h=-log10(0.05/nrow(int.results)), lty=2, lwd=2, col=2)
+```
+
+##### GxE Univariate QQ-Plot:
+```{r GxE: QQ-plot}
+pvalues <- int.results$P.value
+r <- gcontrol2(pvalues, pch=16)
+lambda <- round(r$lambda,3)
+text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
+
+```
+
+<br>
+
+```{r final clean up}
+options(warn=old.warn)
+
+```
+
+
+
+
+
+# GxEScanR
+
+https://cran.r-project.org/web/packages/GxEScanR/index.html  
+https://cran.r-project.org/web/packages/BinaryDosage/index.html
+
+## Introduction 
+
+### BinaryDosage
+Genotype imputation is an essential tool in genomics, enabling association testing with markers not directly genotyped, increasing statistical power, and facilitating data pooling between studies that employ different genotyping platforms. Two commonly used software packages for imputation are minimac and Impute2. Furthermore, services such as the Michigan Imputation Server have made genotype imputation much more accessible and streamlined.
+
+While a number of software options are available for analyses of imputed data (e.g. PLINK, EPACTS), fewer are available for Genomewide Gene x Environment Interaction Scan (GWIS). Furthermore, data management tasks such as parsing, subsetting, and merging, while manageable in smaller studies, quickly become unwieldy and prohibitively slow with very large samples sizes. We aim to address these limitations by converting imputation outputs into a binary dosage file. The benefits of a binary format are two fold - decreased hard drive storage requirements (compared to a VCF file), and speed of parsing/analyses. The **BinaryDosage** package contains functions to convert VCF and Impute2 formatted files into binary dosage files, along with functions to merge samples.
+
+
+### GxEScanR
+**GxEScanR** is designed to efficiently run genome-wide association study (GWAS) and genome-wide by environmental interaction study (GWEIS) scans using imputed genotypes stored in the BinaryDosage format. The phenotype to be analyzed can either be a continuous or binary trait. The GWEIS scan performs multiple tests that can be used in two-step methods.
+
+
+## Analysis
+
+### Data preparation
+
+BinaryDosage requires imputed genotype files as input. Generate VCF and INFO files (e.g. Minimac output)
+
+```{r, echo = T, eval = F}
+library(BinaryDosage)
+
+# Create VCF file
+vcf <- data.frame(t(X)) # transpose
+
+# enter dummy values for required fields
+vcf$chr <- "chr1"
+vcf$pos <- seq(1,1000)
+vcf$ID <- snp.Names
+vcf$FORMAT <- "DS"
+vcf[c('REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'Sample')] <- rep('.', nrow(vcf))
+
+vcf <- vcf[, c('chr', 'pos', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT')]
+colnames(vcf) <- c('#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT')
+vcfout <- cbind(vcf, data.frame(t(X)))
+write.table(vcfout, "./data/out.vcf", quote = F, row.names = F, col.names = T, sep = "\t")
+
+
+# Create INFO file
+info <- vcf[, c('ID', 'REF', 'ALT')]
+info[c('AAF', 'MAF', 'AvgCall', 'Rsq')] <- rep(0.9, nrow(vcf))
+info$Genotyped = "imputed"
+info[c('LooRsq', 'EmpR', 'EmpRsq', 'Dose0', 'Dose1')] = "-"
+info <- info[, c('ID', 'REF', 'ALT', 'AAF', 'MAF', 'AvgCall', 'Rsq', 'Genotyped', 'LooRsq', 'EmpR', 'EmpRsq', 'Dose0', 'Dose1')]
+colnames(info) <- c('SNP', 'REF(0)', 'ALT(1)', 'ALT_Frq', 'MAF', 'AvgCall', 'Rsq', 'Genotyped', 'LooRsq', 'EmpR', 'EmpRsq', 'Dose0', 'Dose1')
+
+write.table(info, "./data/out.info", quote = F, row.names = F, col.names = T, sep = "\t")
+
+# output BinaryDosage file
+BinaryDosage::vcftobd(vcffiles = c("./data/out.vcf", './data/out.info'), gz = FALSE, bdfiles = "./data/out.bdose")
+```
+
+## Run GxEScanR
+
+Requires external covariate file - ID, Outcome, C, E (interaction variable must be in last position)
+
+```{r, echo = T}
+library(BinaryDosage)
+library(GxEScanR)
+
+# read BinaryDosage info
+bdinfo <- BinaryDosage::getbdinfo("/Users/mak/Desktop/out.bdose")
+
+
+# Create covariate file
+covar <- data.frame(U)
+covar$outcome = Y
+covar$e3_asmokcigd_p_None = E
+covar$ID = paste0("X", seq(1, 1122))
+
+covar <- covar[, c("ID", "outcome", "h_mbmi_None", "e3_sex_Nonefemale", "h_age_None", "h_cohort2", "h_cohort3", "h_cohort4", "h_cohort5", "h_cohort6", "h_edumc_None2", "h_edumc_None3", "ethn_PC1", "ethn_PC2", "e3_asmokcigd_p_None")]
+write.table(covar, "./data/covar.txt", row.names = F, quote = F, sep = '\t')
+
+# Run GxEScanR
+output <- GxEScanR::gweis(data = covar, bdinfo = bdinfo)
+
+# create EDGE statistic (used in two-step method)
+output$lrtedge = output$lrtdg + output$lrteg
+```
+
+
+## Q-Q plots {.tabset}
+```{r, echo = T}
+# qq plot function
+
+plot_qq <- function(data, statistic, df) { 
+  pvalues <- pchisq(data[, statistic], df = df, lower.tail = F)
+  r <- gcontrol2(pvalues, pch=16)
+  lambda <- round(r$lambda,3)
+  text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
+}
+
+
+```
+
+### D|G
+```{r, echo = T}
+plot_qq(output, 'lrtdg', 1)
+```
+
+### GxE
+```{r, echo = T}
+plot_qq(output, 'lrtgxe', 1)
+```
+
+### 2DF
+```{r, echo = T}
+plot_qq(output, 'lrt2df', 2)
+```
+
+### 3DF
+```{r, echo = T}
+plot_qq(output, 'lrt3df', 3)
+```
+
+
+## Manhattan plots {.tabset}
+
+```{r echo = T}
+# manhattan plot 
+plot_manhattan <- function(data, statistic, df) {
+  neglog.pvalues <- -log10(pchisq(data[,statistic], lower.tail = F, df = df))
+  plot(1:nrow(data), neglog.pvalues,
+       pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+       ylab="-log(p-value)", xlab="SNPs")
+  abline(h=-log10(0.05/nrow(data)), lty=2, lwd=2, col=2)
+}
+
+# significant findings
+sig_table <- function(data, statistic, df) {
+  varname = paste0(statistic, "_pval")
+  data[varname] <- pchisq(data[,statistic], lower.tail = F, df = df)
+  out <- data[which(data[,varname] < (0.05 / nrow(data))), ]
+  return(out[, c("snp", varname)])
+}
+
+```
+
+
+### D|G
+```{r, echo = T}
+plot_manhattan(output, 'lrtdg', 1)
+```
+
+### GxE
+```{r, echo = T}
+plot_manhattan(output, 'lrtgxe', 1)
+kable(sig_table(output, 'lrtgxe', 1))
+```
+
+### Case-only 
+```{r, echo = T}
+
+```
+
+### 2DF
+```{r, echo = T}
+plot_manhattan(output, 'lrt2df', 2)
+```
+
+### 3DF
+```{r, echo = T}
+plot_manhattan(output, 'lrt3df', 3)
+```
+
+## Two-step methods {.tabset}
+
+```{r echo = T}
+# twostep helper function
+plot_twostep <- function(data, step1_statistic, step1_df, sizeBin0, alpha) {
+
+  # create bins
+  m = nrow(output)
+  nbins = ceiling(log2(m/sizeBin0 + 1))
+  sizeBin = c(sizeBin0 * 2^(0:(nbins-2)), m - sizeBin0 * (2^(nbins-1) - 1) )
+  endpointsBin = cumsum(sizeBin)
+  
+  rk.pv <- c(1:m)
+  grp <- ceiling(log(rk.pv/sizeBin0+1,base=2))
+  rep_helper <- c(table(grp))
+  alphaBin = alpha * 2 ^ -(1:nbins) / sizeBin
+  alphaBin_dat <- rep(alphaBin, rep_helper)
+
+  # create pvalues and bin variables
+  data$step1p <- pchisq(data[, step1_statistic], df = step1_df, lower.tail = F)
+  data$step2p <- pchisq(data[, 'lrtgxe'], df = 1, lower.tail = F)
+  data                   <- data[order(-data[,step1_statistic]), ]   # sort by step1_statistic
+  data$bin_number        <- as.numeric(grp)
+  data$step2p_siglvl     <- as.numeric(alphaBin_dat)
+  data$log_step2p_siglvl <- -log10(data$step2p_siglvl)
+  data$log_step2p        <- -log10(data$step2p)
+  
+  significant_hits <- data[which(data$step2p < data$step2p_siglvl), ]
+
+  # create plot
+  # split data into lists (for each bin)
+  data_plot <- split(data, f = list(data$bin_number))
+  
+  # mapinfo just to make sure SNPs are plotted evenly in each bin
+  create_mapinfo <- function(x) {
+    mapinfo <- seq(unique(x$bin_number) - 1 + 0.1, unique(x$bin_number) - 1 + 0.9, length.out = nrow(x))
+    out <- cbind(x, mapinfo)
+    return(out)
+  }
+
+  data_plot <- lapply(data_plot, create_mapinfo)
+  logp_plot_limit = 12
+
+  # PLOT  
+  binsToPlot = length(data_plot)
+  color <- rep(c("#377EB8","#4DAF4A"),100)
+  par(mar=c(6, 7, 6, 3))
+  
+  bin_to_plot = data_plot[[1]]
+  plot(bin_to_plot$mapinfo, bin_to_plot$log_step2p,
+       col = ifelse(bin_to_plot$snp %in% significant_hits[, 'snp'], '#E41A1C','#377EB8'),
+       pch = ifelse(bin_to_plot$snp %in% significant_hits[, 'snp'], 19, 20),
+       cex = ifelse(bin_to_plot$snp %in% significant_hits[, 'snp'], 1.3, 1.7),
+       xlab="Bin number for step1 p value",
+       ylab="-log10(step2 chiSqGxE p value)",
+       xlim=c(0, binsToPlot),
+       ylim=c(0, logp_plot_limit),
+       axes=F,
+       cex.main = 1.7,
+       cex.axis = 1.7,
+       cex.lab = 1.7,
+       cex.sub = 1.7)
+  lines(bin_to_plot$mapinfo, bin_to_plot$log_step2p_siglvl, col = "black", lwd=1)
+  
+  # remaining bins
+  for(i in 2:binsToPlot) {
+    bin_to_plot = data_plot[[i]]
+    points(bin_to_plot$mapinfo, bin_to_plot$log_step2p,
+           col = ifelse(bin_to_plot$snp %in% significant_hits$snp, '#E41A1C', color[i]),
+           pch = ifelse(bin_to_plot$snp %in% significant_hits$snp, 19, 20),
+           cex = ifelse(bin_to_plot$snp %in% significant_hits$snp, 1.3, 1.7),
+           cex.main = 1.7,
+           cex.axis = 1.7,
+           cex.lab = 1.7,
+           cex.sub = 1.7)
+    lines(bin_to_plot$mapinfo, bin_to_plot$log_step2p_sig, col = "black",lwd = 1)
+  }
+  
+  axis(1, at = c(-1.5, seq(0.5, binsToPlot-0.2, 1)), label = c(0, seq(1, binsToPlot, 1)), cex.axis = 1.7)
+  axis(2, at = c(0:floor(logp_plot_limit)), label = c(0:logp_plot_limit), cex.axis=1.7)
+  
+}
+
+
+# significant findings
+# report SNP, step1, step2
+
+sig_twostep <- function(data, step1_statistic, step1_df, sizeBin0, alpha) {
+
+  # create bins
+  m = nrow(output)
+  nbins = ceiling(log2(m/sizeBin0 + 1))
+  sizeBin = c(sizeBin0 * 2^(0:(nbins-2)), m - sizeBin0 * (2^(nbins-1) - 1) )
+  endpointsBin = cumsum(sizeBin)
+  
+  rk.pv <- c(1:m)
+  grp <- ceiling(log(rk.pv/sizeBin0+1,base=2))
+  rep_helper <- c(table(grp))
+  alphaBin = alpha * 2 ^ -(1:nbins) / sizeBin
+  alphaBin_dat <- rep(alphaBin, rep_helper)
+
+  # create pvalues and bin variables
+  data$step1p <- pchisq(data[, step1_statistic], df = step1_df, lower.tail = F)
+  data$step2p <- pchisq(data[, 'lrtgxe'], df = 1, lower.tail = F)
+  data                   <- data[order(-data[,step1_statistic]), ]   # sort by step1_statistic
+  data$bin_number        <- as.numeric(grp)
+  data$step2p_siglvl     <- as.numeric(alphaBin_dat)
+  data$log_step2p_siglvl <- -log10(data$step2p_siglvl)
+  data$log_step2p        <- -log10(data$step2p)
+  
+  significant_hits <- data[which(data$step2p < data$step2p_siglvl), c("snp", "step1p", "step2p")]
+
+  return(significant_hits)
+}
+
+
+
+
+
+
+```
+
+
+
+
+### Twostep D|G 
+```{r, echo = T}
+plot_twostep(output, step1_statistic = 'lrtdg', step1_df = 1, sizeBin0 = 5, alpha = 0.05) 
+kable(sig_twostep(output, step1_statistic = 'lrtdg', step1_df = 1, sizeBin0 = 5, alpha = 0.05)) %>% kable_styling()
+```
+
+### Twostep E|G
+```{r, echo = T}
+plot_twostep(output, step1_statistic = 'lrteg', step1_df = 1, sizeBin0 = 5, alpha = 0.05) 
+kable(sig_twostep(output, step1_statistic = 'lrteg', step1_df = 1, sizeBin0 = 5, alpha = 0.05)) %>% kable_styling()
+
+```
+
+### Twostep EDGE
+```{r, echo = T}
+plot_twostep(output, step1_statistic = 'lrtedge', step1_df = 2, sizeBin0 = 5, alpha = 0.05) 
+kable(sig_twostep(output, step1_statistic = 'lrtedge', step1_df = 2, sizeBin0 = 5, alpha = 0.05)) %>% kable_styling()
+
+```
+
+
+
+END THE SLKDE ASKING THIS QUESTion - what do you think about scans doing SNP by SNP? in cmoplex disease with many SNPs with small effects, does this seem like the best way to do this? 
+
