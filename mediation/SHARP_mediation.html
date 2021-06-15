@@ -260,7 +260,7 @@ div.tocify {
 
 <h1 class="title toc-ignore">SHARP Multi-omics Workshop: Mediation Analysis</h1>
 <h4 class="author">Yinqi Zhao, David Conti</h4>
-<h4 class="date">2021-06-12 14:24:02</h4>
+<h4 class="date">2021-06-14 17:54:52</h4>
 
 </div>
 
@@ -413,10 +413,10 @@ result_simple_mediation = mediate(model_2, model_3, treat = &quot;X&quot;, media
 ## Nonparametric Bootstrap Confidence Intervals with the Percentile Method
 ## 
 ##                Estimate 95% CI Lower 95% CI Upper p-value   
-## ACME            0.02416      0.00662         0.05   0.004 **
-## ADE             0.04299     -0.00851         0.10   0.098 . 
-## Total Effect    0.06715      0.01085         0.13   0.022 * 
-## Prop. Mediated  0.35979      0.09223         1.21   0.026 * 
+## ACME            0.02416      0.00833         0.05   0.002 **
+## ADE             0.04299     -0.01091         0.09   0.110   
+## Total Effect    0.06715      0.01240         0.13   0.018 * 
+## Prop. Mediated  0.35979      0.11023         1.31   0.020 * 
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
@@ -429,6 +429,8 @@ result_simple_mediation = mediate(model_2, model_3, treat = &quot;X&quot;, media
 </div>
 <div id="mediation-analysis-with-multiple-mediator" class="section level2">
 <h2>3. Mediation Analysis with Multiple Mediator</h2>
+<p>In some cases, one single mediator is not enough to explain the biology behind the statistical association and it is of particular interest to incorporate multiple omics variables in mediation analysis. Back to our example, we previously discussed the mediation effect of insulin between exposure to Hexachlorobenzene in mother and obesity in children. Tumour necrosis factor (TNF)-alpha has been found over-expressed in adipose tissue from obese animals and human. Nieto-Vazquez (2008) conducted comprehensive molecular biological study to explore the mechanism how TNF-alpha regulates insulin resistance. As a result, it is natural to include TNF-alpha in our mediation pathway and jointly analyze the mediation effect of TNF-alpha and insulin towards obesity.</p>
+<p>The general pipeline of mediation analysis with multiple mediators is similar to the simple mediation framework. Here we utilize an R pakcage <code>lavaan</code> to achieve the goal of multiple mediation analysis, which is modeled as a Structural Equation Model (SEM). Let’s define insulin as <code>M1</code> and TNF-alpha as <code>M2</code>. Firstly, we write out the multiple mediation models, including a single outcome model <code>Y ~ b1 * M1 + b2 * M2 + c * X</code> and a mediator model for each potential mediator (<code>M1 ~ a1 * X</code> and <code>M2 ~ a2 * X</code>). Next, we define the indirect (mediation) effect and the total effect. Lastly, we need to incorporate a covariance matrix for multiple mediators, this is expressed in terms of double tilde <code>~~</code>.</p>
 <pre class="r"><code>dat2 = data.frame(X = X,
                   M1 = dat$INSULIN,
                   M2 = dat$TNFalfa,
@@ -440,6 +442,7 @@ M2 ~ a2 * X
 indirect1 := a1 * b1
 indirect2 := a2 * b2
 total := c + (a1 * b1) + (a2 * b2)
+# covariances
 M1 ~~ M2
 &#39;
 med_multiple_M &lt;- sem(model = multipleMediation, data = dat2)
@@ -568,15 +571,20 @@ summary(med_multiple_M2)</code></pre>
 </div>
 </div>
 </div>
-<div id="advanced-mediation-analysis" class="section level2">
-<h2>4. Advanced Mediation Analysis</h2>
+<div id="advanced-mediation-analysis-for-high-dimensional-data" class="section level2">
+<h2>4. Advanced Mediation Analysis for High Dimensional Data</h2>
+<p>As biotechnology advances, the dimensionality of datasets considered as mediator, such our omcis data here, increases drastically. The extension of mediation analysis to multiple mediators is not enough to address the challenges arising from high dimensional data. Firstly, it is hard and tedious to write out the above multiple mediation model to a large number of mediators: imagine we have 1,000 variables in the omics dataset, we’ll have to write a 1,000 line equation for that! Secondly, not all variables in the omics dataset are informative.). When simultaneously analyzing a relatively large number of mediators, potentially, researchers usually assume, which is often true, that only a small number of omics variables are truly active. Methods have been developed to address such challenge. In most cases, this high dimensional mediation analysis is treated as a variable selection problem by incorporating regularization techniques. For illustration purpose, we use a relatively small dataset with 45 omics variable to demonstrate some advanced mediation analysis for high dimensional data.</p>
 <pre class="r"><code>omics = as.data.frame(dat[, 19:63])</code></pre>
 <div id="hima" class="section level3">
 <h3>4.1 HIMA</h3>
+<p>We first introduce a method for testing high-dimensional mediation effects proposed by Zhang (2016), referred as HIMA which is the name of R package of their method. HIMA analysis consists of two steps. The first step is to reduce the candidate mediators to a moderate number, which is less that the sample size <span class="math inline">\(n\)</span>. Then at step two, HIMA minimized the penalized sum of squares based on the mediation model, which is <span class="math display">\[
+Q = \sum_{i = 1}^n\left( Y_i - b_0 - c&#39;X - \sum_{j = 1}^p b_j M \right) + \sum_{j = 1}^p p(b_j)
+\]</span> where <span class="math inline">\(Q\)</span> is the penalized least square function, and <span class="math inline">\(p(b_j)\)</span> is the penalty function for each coefficient related to mediators. Different penalty functions are availabe for <code>HIMA</code> package, including minimax concave penalty (MCP, which is the default penalty), LASSO penalty etc.</p>
 <pre class="r"><code>med_multiple_hima = hima(X = dat$hs_hcb_madj_Log2,
                          Y = dat$hs_zbmi_who,
                          M = omics,
-                         family = &quot;gaussian&quot;)
+                         family = &quot;gaussian&quot;,
+                         penalty = &quot;MCP&quot;)
 med_multiple_hima</code></pre>
 <div data-pagedtable="false">
 <script data-pagedtable-source type="application/json">
@@ -586,6 +594,10 @@ med_multiple_hima</code></pre>
 </div>
 <div id="bama" class="section level3">
 <h3>4.2 BAMA</h3>
+<p>Song (2020) developed a Bayesian method using continuous shrinkage priors to extend the causal mediation framework to high-dimensional setting (referred as <code>BAMA</code> here, which is also the name of the package). The general idea of this method is to treat the high-dimensional mediation challenge as a variable selection problem. Consistent with the idea of omnigenic model, the author assumed that all mediators potentially contribute small effects in mediating the exposure-outcome relationship while only a small portion of mediators exhibiting large effects (these mediators are defined as core genes in the omnigenic model). This assumption can be written in statistical language as below: <span class="math display">\[
+a_j \sim \pi_M N(0, \sigma^2_{M_1}) + (1 - \pi_M)N(0, \sigma_{M_2}^2) \\
+b_j \sim \pi_E N(0, \sigma^2_{E_1}) + (1 - \pi_E)N(0, \sigma_{E_2}^2)
+\]</span> where <span class="math inline">\(a_j\)</span> is the coefficient of exposure in mediator model <span class="math inline">\(j\)</span> and <span class="math inline">\(b_j\)</span> is the coefficient of mediator <span class="math inline">\(j\)</span> in the outcome model. Additionally, <span class="math inline">\(\sigma_{M_1}^2 &gt; \sigma_{M_2}^2\)</span>. The active mediators are assumed to belong to a normal distribution with larger variance, which is <span class="math inline">\(N(0, \sigma^2_{M_1})\)</span> and <span class="math inline">\(N(0, \sigma_{E_1}^2)\)</span>.</p>
 <pre class="r"><code># We add intercept term since we don&#39;t include any covariates here
 C1 = matrix(1, nrow(omics), 1)
 C2 = matrix(1, nrow(omics), 1)
@@ -1146,6 +1158,7 @@ ggplot(E_mean_melt, aes(fill = variable, y = value, x = variable)) +
 <li>Baron, R.M. and Kenny, D.A., 1986. The moderator–mediator variable distinction in social psychological research: Conceptual, strategic, and statistical considerations. Journal of personality and social psychology, 51(6), p.1173.</li>
 <li>Shrout, P.E. and Bolger, N., 2002. Mediation in experimental and nonexperimental studies: new procedures and recommendations. Psychological methods, 7(4), p.422.</li>
 <li>Cadiou, S., Basagaña, X., Gonzalez, J.R., Lepeule, J., Vrijheid, M., Siroux, V. and Slama, R., 2021. Performance of approaches relying on multidimensional intermediary data to decipher causal relationships between the exposome and health: A simulation study under various causal structures. Environment International, 153, p.106509.</li>
+<li>Nieto-Vazquez, I., Fernández-Veledo, S., Krämer, D.K., Vila-Bedmar, R., Garcia-Guerra, L. and Lorenzo, M., 2008. Insulin resistance associated to obesity: the link TNF-alpha. Archives of physiology and biochemistry, 114(3), pp.183-194.</li>
 </ol>
 </div>
 <div id="appendix" class="section level2">
