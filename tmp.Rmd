@@ -1,0 +1,642 @@
+---
+title: 'SHARP Multiomics Workshop Session 2: Interactions'
+author: "Andre Kim"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+    code_folding: show
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+<!-- ```{css, echo=FALSE} -->
+<!-- pre { -->
+<!--   max-height: 200px; -->
+<!--   overflow-y: auto; -->
+<!-- } -->
+<!-- ``` -->
+
+```{r setup, include=FALSE, echo=FALSE}
+library(tidyverse)
+library(MultiAssayExperiment)
+library(knitr)
+library(ggplot2)
+library(reshape2)
+library(gap)
+library(kableExtra)
+
+options(knitr.table.format = "html")
+knitr::opts_chunk$set(echo = TRUE)
+
+# suppress warning messages for final rendering
+old.warn <- getOption("warn")
+options(warn=-1)
+```
+
+
+# SHARP MULTIOMICS WORKSHOP
+
+## Example - HELIX study
+<!-- ### Data descriptions for interactions -->
+
+As mentioned in the lecture, the HELIX study is a collaborative project across six longitudinal population-based birth cohort studies in six European countries (France, Greece, Lithuania, Norway, Spain, and the United Kingdom). In this example, we will use data from the subcohort of 1,301 mother-child pairs (N = 1,122 with complete data), specifically exposure and genomic data from children 6-11 years old, to investigate GxE interactions between fetal alcohol/smoking exposures and genetic variants, and their influence on future childhood BMI. 
+
+We will consider the following outcome and exposure variables:
+
+* **hs_bmi_c_cat (Outcome)** - Body mass index, dichotomized
+  + 0 = Thinness/Normal
+  + 1 = Overweight/Obese (WHO reference)
+* **lifestyles_e3_alcpreg_yn_None (Interaction exposure)** - Maternal alcohol use during pregnancy
+  + 0 = Never
+  + 1 = Ever
+* **h_mbmi_None** - Maternal pre-pregnancy body mass index
+  + kg/m2 (continuous)
+* **covariates_e3_sex_None** - Sex
+  + 0 = Female
+  + 1 = Male
+* **h_age_None** - Maternal age
+  + years (continuous)
+* **h_cohort** - Cohort country
+  + 1 = France 
+  + 2 = Greece
+  + 3 = Lithuania
+  + 4 = Norway
+  + 5 = Spain 
+  + 6 = UK
+* **h_edumc_None** - Maternal education
+  + 1 = primary school
+  + 2 = secondary school
+  + 3 = university degree or higher
+* **ethn_PC1/2** - principal components (ethnicity)
+
+<br>
+
+### Processing the data
+
+We begin by obtaining the variables of interest from `HELIX.MultiAssayExperiment`, which is an R object that conveniently stores multiple datasets (e.g. exposure, omics) measured on the same individual.  
+
+```{r GxE: Processing the Data, echo=TRUE, cache = T}
+# ---- Load RData containing HELIX MultiAssayExperiment object ---- #
+load("~/Google Drive/My Drive/SHARP.MultiomicsWorkshop.USC.share/data/HELIX.MultiAssayExperiment.RData")
+
+# ---- specify variable names to extract ---- #
+# Outcome (BMI)
+outcome.Name <- "hs_bmi_c_cat"
+# Exposure (maternal alcohol consumption)
+exposure.Name <- "e3_asmokcigd_p_None"
+# Covariates
+covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None","ethn_PC1","ethn_PC2")
+# Genotypes (m = 1000)
+snp.Names <- paste("SNP", 1:1000, sep=".")
+variables <- c(covariate.Names, exposure.Name, "h_ethnicity_cauc", snp.Names)
+
+# ---- extract variables (functions from MultiAssayExperiment package ---- #
+# 1) select variables but keep in MultiAssayExperiment format
+# 2) intersectionColumns selects only individuals with complete data (N = 1,122)
+# 3) wideFormat returns as a data.frame
+# d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name)
+# saveRDS(d, "data/d_smoke.rds")
+d <- readRDS("data/d_smoke.rds")
+
+# ---- Create genotype design matrix ---- #
+X <- d[,grep("SNP", names(d))]
+names(X) <- snp.Names
+X <- as.matrix(X)
+
+# ---- create epi data.frame ---- #
+dataset <- data.frame(d[,c("primary", "hs_bmi_c_cat", "exposome_e3_asmokcigd_p_None",
+"covariates_h_mbmi_None", "covariates_e3_sex_None", "covariates_h_age_None",
+"covariates_h_cohort", "covariates_h_edumc_None", "proteome.cov_ethn_PC1",
+"proteome.cov_ethn_PC2", "proteome.cov_h_ethnicity_cauc")])
+
+# rename columns for consistency
+names(dataset) <- c("primary", "hs_bmi_c_cat", "e3_asmokcigd_p_None",
+"h_mbmi_None", "e3_sex_None", "h_age_None",
+"h_cohort", "h_edumc_None", "ethn_PC1",
+"ethn_PC2", "h_ethnicity_cauc")
+
+# dichotomize outcome variable
+dataset$hs_bmi_c_cat <- factor(ifelse(as.numeric(dataset$hs_bmi_c_cat)>=3, 1, 0), label = c("Thin/Normal", "Overweight/Obese"))
+
+# dichotomize exposure variable
+dataset$e3_asmokcigd_p_None <- ifelse(as.numeric(dataset$e3_asmokcigd_p_None) > 0,1,0)
+
+# code variables properly, apply labels
+dataset[, c("h_mbmi_None", "h_age_None", "ethn_PC1", "ethn_PC2")] <- lapply(dataset[, c("h_mbmi_None", "h_age_None", "ethn_PC1", "ethn_PC2")], as.numeric)
+dataset[, c("e3_asmokcigd_p_None", "e3_sex_None", "h_cohort")] <- lapply(dataset[, c("e3_asmokcigd_p_None", "e3_sex_None", "h_cohort")], factor)
+dataset$h_edumc_None <- factor(dataset$h_edumc_None, label = c("Primary school", "Secondary school", "University degree or higher"))
+
+# Other variables for analysis
+N <- nrow(d) # number of individuals in the analysis
+P <- ncol(X)  # number of SNPs in the matrix X
+```
+
+<br> 
+ 
+### Descriptive statistics
+
+```{r echo = T, message=F}
+library(table1) # table1 package for convenience
+
+label(dataset$e3_asmokcigd_p_None) <- "Maternal smoking during pregnancy"
+label(dataset$h_age_None) <- "Maternal age"
+label(dataset$e3_sex_None) <- "Sex"
+label(dataset$h_mbmi_None) <- "Maternal pre-pregnancy BMI"
+label(dataset$h_edumc_None) <- "Maternal education"
+
+# run table1 function
+table1(~ e3_asmokcigd_p_None +
+         h_age_None + 
+         e3_sex_None +
+         h_edumc_None +
+         h_mbmi_None | hs_bmi_c_cat, data=dataset)
+```
+
+<br>
+
+### Univariate association tests
+
+```{r, echo = T, results='asis', message = F}
+
+# ---- model hs_bmi_c_cat ~ exposures ---- #
+univariate_vars <- c("e3_asmokcigd_p_None", "h_age_None", "e3_sex_None", "h_edumc_None", "h_mbmi_None")
+
+univariate.results <- t(sapply(univariate_vars, FUN=function(p) {  # using index p facilitate write
+  x <- dataset[,p]
+  reg <- glm(dataset$hs_bmi_c_cat ~ as.numeric(x), family=binomial)    # perform logistic regression
+  s.reg <- summary(reg)                 # get the summary for the regression
+  c.reg <- s.reg$coef[2,]             # select the coefficients for the exposure
+  return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+}, simplify=T))
+univariate.results <- data.frame(univariate_vars,univariate.results)
+names(univariate.results) <- c("Variable","Estimate", "SD","Z.Statistic", "P-value")
+univariate.results$`P-value` <-  format(univariate.results$`P-value`, scientific=T)
+
+kable(univariate.results) %>% 
+  kable_styling()
+```
+
+<br>
+
+### Genomic data {.tabset}
+
+Genotype data includes `r P` single nucleotide polymorphisms (SNPs)
+
+#### Plot of genetic ancestry (PCA)
+```{r Genome: PC plot, echo=TRUE}
+plot(d$proteome.cov_ethn_PC1, d$proteome.cov_ethn_PC2, pch=16, col=ifelse(d$proteome.cov_h_ethnicity_cauc=="yes", 1, 2),
+     xlab="Component 1", ylab="Component 2")
+legend(x="topleft", legend=c("Caucasian", "Other"), col=c(1,2), pch=16)
+```
+
+#### Correlation matrix for local genomic region
+```{r Genome: cor.plot, echo=TRUE}
+cormat <- round(cor(X[,1:(P/5)], use="complete.obs"), 2)
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1), space = "Lab",
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank())+
+  labs(y= "SNPs", x = "SNPs")+
+  coord_fixed()
+
+```
+
+<br>
+
+## GxE overview
+
+Question: is there effect heterogeneity for the association of maternal alcohol consumption and childhood BMI by germline genetics?
+
+<br>
+
+### Simple interaction model
+
+Fit a traditional logistic regression model with an interaction term in the form $$logit(Pr D=1|G,E) = \alpha + \beta_EE + \beta_GG + \beta_{GxE}G*E$$
+
+Testing the hypothesis $H0:\beta_{GxE} = 0$ is equivalent to testing whether the ratio $\frac{OR_{GxE}}{OR_G*OR_E} = 1$ e.g. departure from multiplicative effects
+
+In this example, let's start with `SNP.1`. We'll adjust all models by maternal age, maternal pre-pregnancy BMI, maternal education, study country, sex, and ancestry (2 principal components): 
+
+```{r}
+
+SNP.1 <- X[,1]
+
+model <- glm(hs_bmi_c_cat ~ e3_asmokcigd_p_None * SNP.1 + h_age_None + h_mbmi_None +  h_cohort + h_edumc_None + e3_sex_None + ethn_PC1 + ethn_PC2, data = dataset, family = 'binomial')
+
+summary(model)
+
+```
+
+The term `e3_asmokcigd_p_None1:SNP.1` has p.value = 0.17. Hence, we cannot reject the null hypothesis and do not conclude there is statistically significant evidence of interactions on a multiplicative scale. 
+
+<br>
+
+### Genome-wide interaction scans
+
+To test for interactions genome-wide, we fit the same traditional logistic regression models for every SNP. In this example, since m = `r P` we can use a simple loop:
+
+```{r GxE: Univariate model, echo=TRUE}
+
+int.results <- t(sapply(1:ncol(X), FUN=function(p) {  # using index p facilitate write
+    g <- X[,p]
+    reg <- glm(hs_bmi_c_cat ~ g*e3_asmokcigd_p_None + h_age_None + h_mbmi_None +  h_cohort + h_edumc_None + e3_sex_None + ethn_PC1 + ethn_PC2, data = dataset, family=binomial)    # perform logistic regression
+    s.reg <- summary(reg)                 # get the summary for the regression
+    c.reg <- as.numeric(s.reg$coef["g:e3_asmokcigd_p_None1", ]) # select the coefficients
+    return(c.reg)                         # to avoid potential memory issues only return coefficients if small number of exposures
+  }, simplify=T))
+  int.results <- data.frame(paste("E:SNP", 1:ncol(X), sep="."), int.results)
+  names(int.results) <- c("E:SNP.Name","Estimate", "SD","Z.statistic", "P.value")
+
+```
+
+<br>
+
+#### GxE Univariate results: {.tabset}
+##### GxE Univariate Summary Table:
+```{r GxE: Univariate table}
+kable(int.results[int.results$P.value<0.05,], digits=3, align="c", row.names=FALSE, col.names=c("E:SNP","Estimate", "SD","Z statistic", "P value"))
+```
+
+<br>
+
+##### GxE Univariate Manhattan Plot:
+```{r GxE: Univariate MH plot}
+neglog.pvalues <- -log10(int.results$P.value)
+plot(1:nrow(int.results), neglog.pvalues,
+     pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+     ylab="-log(p-value)", xlab="SNPs")
+abline(h=-log10(0.05/nrow(int.results)), lty=2, lwd=2, col=2)
+```
+
+<br>
+
+##### GxE Univariate QQ-Plot:
+```{r GxE: QQ-plot}
+pvalues <- int.results$P.value
+r <- gcontrol2(pvalues, pch=16)
+lambda <- round(r$lambda,3)
+text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
+```
+
+<br>
+
+### `BinaryDosage`, `GxEScanR`
+
+Genome-wide interaction scans can be computationally expensive when the number of markers exceed several million, as is often the case in imputed genotype data. Imputation is a useful tool in genomics that enables association testing with markers not directly genotyped, increasing statistical power and facilitating data pooling between studies.   
+
+BinaryDosage/GxEScanR is a set of software packages that efficiently performs interaction scans of imputed data (VCF and gen/sample format), and implements several of the methods discuss in the lecture portion.  
+
+These packages are available on CRAN:  
+
+* https://cran.r-project.org/web/packages/GxEScanR/index.html
+* https://cran.r-project.org/web/packages/BinaryDosage/index.html
+
+`BinaryDosage` converts imputed genomic data into a binary format that facilitates data storage, management, and analysis. Input files must be in VCF or gen/sample format. 
+
+`GxEScanR` is designed to efficiently run genome-wide association study (GWAS) and genome-wide by environmental interaction study (GWEIS) scans using imputed genotypes stored in the `BinaryDosage` format. The phenotype to be analyzed can either be a continuous or binary trait. The GWEIS scan performs multiple tests that can be used in two-step methods.
+
+
+#### Data preparation
+
+In order to convert genotype files to `BinaryDosage` format, we require VCF + INFO files (e.g. typical `Minimac3/4` output from the Michigan Imputation Server)
+
+`GxEScanR` requires two input files:   
+
+* `BinaryDosage` file 
+* a covariate text file. The first two columns must be the ID and outcome variables, and the last column must contain the interaction variable
+
+Let's create the required files here. Note: for VCF file creation, you'll typically have genotypes output in this format by imputation software, or you'll be able to use software packages like `plink`. I include code for illustration only. 
+
+Refer to https://samtools.github.io/hts-specs/VCFv4.2.pdf for VCF file specifications.
+
+```{r, echo = T, eval = F}
+
+# ---- VCF/INFO files ---- #
+
+# generate VCF file using design matrix as input
+vcf <- data.frame(t(X)) # transpose
+# dummy values for this example only
+vcf$chr <- "chr1"
+vcf$pos <- seq(1,1000)
+vcf$ID <- snp.Names
+vcf$FORMAT <- "DS"
+vcf[c('REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'Sample')] <- rep('.', nrow(vcf))
+vcf <- vcf[, c('chr', 'pos', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT')]
+colnames(vcf) <- c('#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT')
+vcfout <- cbind(vcf, data.frame(t(X)))
+write.table(vcfout, "./data/smoking.vcf", quote = F, row.names = F, col.names = T, sep = "\t")
+
+# Generate INFO file
+info <- vcf[, c('ID', 'REF', 'ALT')]
+info[c('AAF', 'MAF', 'AvgCall', 'Rsq')] <- rep(0.9, nrow(vcf))
+info$Genotyped = "imputed"
+info[c('LooRsq', 'EmpR', 'EmpRsq', 'Dose0', 'Dose1')] = "-"
+info <- info[, c('ID', 'REF', 'ALT', 'AAF', 'MAF', 'AvgCall', 'Rsq', 'Genotyped', 'LooRsq', 'EmpR', 'EmpRsq', 'Dose0', 'Dose1')]
+colnames(info) <- c('SNP', 'REF(0)', 'ALT(1)', 'ALT_Frq', 'MAF', 'AvgCall', 'Rsq', 'Genotyped', 'LooRsq', 'EmpR', 'EmpRsq', 'Dose0', 'Dose1')
+write.table(info, "./data/smoking.info", quote = F, row.names = F, col.names = T, sep = "\t")
+
+# ---------------------------------- #
+# ---- output BinaryDosage file ---- #
+# ---------------------------------- #
+library(BinaryDosage)
+BinaryDosage::vcftobd(vcffiles = c("./data/smoking.vcf", './data/smoking.info'), gz = FALSE, bdfiles = "./data/smoking.bdose")
+
+# ------------------------------- #
+# ---- output covariate file ---- #
+# ------------------------------- #
+# create covariate file with indicator variables for factors
+# make sure it fits requirements specified in GxEScanR documentation
+covariates <- c("hs_bmi_c_cat", "h_mbmi_None", 
+"e3_sex_None", "h_age_None", "h_cohort", "h_edumc_None", "ethn_PC1", 
+"ethn_PC2",  "e3_asmokcigd_p_None")
+dataset_gxescan <- data.frame(model.matrix(as.formula(paste("~-1+", paste(covariates, collapse = "+"))), data = dataset))
+dataset_gxescan <- dataset_gxescan[ , -which(colnames(dataset_gxescan) %in% "hs_bmi_c_catThin.Normal")]
+ID <- paste0("X", seq(1, 1122, 1))
+dataset_gxescan <- cbind(ID, dataset_gxescan)
+
+write.table(dataset_gxescan, "./data/covar_smoking.txt", row.names = F, quote = F, sep = '\t')
+```
+
+#### Run GxEScanR
+
+Requires external covariate file - ID, Outcome, C, E (interaction variable must be in last position)
+
+```{r, echo = T}
+library(GxEScanR)
+
+# Run GxEScanR
+bdinfo <- BinaryDosage::getbdinfo("data/smoking.bdose")
+covar <- read.table("data/covar_smoking.txt", stringsAsFactors = F, header = T)
+output <- GxEScanR::gweis(data = covar, bdinfo = bdinfo)
+
+# create EDGE statistic (used in two-step method)
+output$lrtedge = output$lrtdg + output$lrteg
+```
+
+## Q-Q plots {.tabset}
+```{r, echo = T}
+# qq plot function
+plot_qq <- function(data, statistic, df) {
+  pvalues <- pchisq(data[, statistic], df = df, lower.tail = F)
+  r <- gcontrol2(pvalues, pch=16)
+  lambda <- round(r$lambda,3)
+  text(x=1, y=5, labels=bquote(lambda == .(lambda)), cex=2)
+}
+```
+
+### D|G
+```{r, echo = T}
+plot_qq(output, 'lrtdg', 1)
+```
+
+### GxE
+```{r, echo = T}
+plot_qq(output, 'lrtgxe', 1)
+```
+
+### Case only
+```{r, echo = T}
+plot_qq(output, 'lrtcase', 1)
+```
+
+### 2DF
+```{r, echo = T}
+plot_qq(output, 'lrt2df', 2)
+```
+
+### 3DF
+```{r, echo = T}
+plot_qq(output, 'lrt3df', 3)
+```
+
+## Manhattan plots {.tabset}
+
+```{r echo = T}
+# manhattan plot
+data = output
+statistic = 'lrtcase'; df = 1
+plot_manhattan <- function(data, statistic, df) {
+
+  # remove NA reults if any
+  data <- data[which(!is.na(data[,statistic])), ]
+
+  # plot
+  neglog.pvalues <- -log10(pchisq(data[,statistic], lower.tail = F, df = df))
+  plot(1:nrow(data), neglog.pvalues,
+       pch=16, xaxt="n", ylim=c(0, max(neglog.pvalues, 3)),
+       ylab="-log(p-value)", xlab="SNPs")
+  abline(h=-log10(0.05/nrow(data)), lty=2, lwd=2, col=2)
+}
+# significant findings
+sig_table <- function(data, statistic, df) {
+  varname = paste0(statistic, "_pval")
+  data[varname] <- pchisq(data[,statistic], lower.tail = F, df = df)
+  out <- data[which(data[,varname] < (0.05 / nrow(data))), ]
+  return(out[, c("snp", varname)])
+}
+```
+
+### D|G
+```{r, echo = T}
+plot_manhattan(output, 'lrtdg', 1)
+```
+
+### GxE
+```{r, echo = T}
+plot_manhattan(output, 'lrtgxe', 1)
+# kable(sig_table(output, 'lrtgxe', 1))
+```
+
+### Case-only
+```{r, echo = T}
+plot_manhattan(output, 'lrtcase', 1)
+```
+
+### 2DF
+```{r, echo = T}
+plot_manhattan(output, 'lrt2df', 2)
+```
+
+### 3DF
+```{r, echo = T}
+plot_manhattan(output, 'lrt3df', 3)
+```
+
+## Two-step methods {.tabset}
+```{r echo = T}
+# twostep helper function
+plot_twostep <- function(data, step1_statistic, step1_df, sizeBin0, alpha) {
+  # create bins
+  m = nrow(output)
+  nbins = ceiling(log2(m/sizeBin0 + 1))
+  sizeBin = c(sizeBin0 * 2^(0:(nbins-2)), m - sizeBin0 * (2^(nbins-1) - 1) )
+  endpointsBin = cumsum(sizeBin)
+  rk.pv <- c(1:m)
+  grp <- ceiling(log(rk.pv/sizeBin0+1,base=2))
+  rep_helper <- c(table(grp))
+  alphaBin = alpha * 2 ^ -(1:nbins) / sizeBin
+  alphaBin_dat <- rep(alphaBin, rep_helper)
+  # create pvalues and bin variables
+  data$step1p <- pchisq(data[, step1_statistic], df = step1_df, lower.tail = F)
+  data$step2p <- pchisq(data[, 'lrtgxe'], df = 1, lower.tail = F)
+  data                   <- data[order(-data[,step1_statistic]), ]   # sort by step1_statistic
+  data$bin_number        <- as.numeric(grp)
+  data$step2p_siglvl     <- as.numeric(alphaBin_dat)
+  data$log_step2p_siglvl <- -log10(data$step2p_siglvl)
+  data$log_step2p        <- -log10(data$step2p)
+  significant_hits <- data[which(data$step2p < data$step2p_siglvl), ]
+  # create plot
+  # split data into lists (for each bin)
+  data_plot <- split(data, f = list(data$bin_number))
+
+    # mapinfo just to make sure SNPs are plotted evenly in each bin
+  create_mapinfo <- function(x) {
+    mapinfo <- seq(unique(x$bin_number) - 1 + 0.1, unique(x$bin_number) - 1 + 0.9, length.out = nrow(x))
+    out <- cbind(x, mapinfo)
+    return(out)
+  }
+  data_plot <- lapply(data_plot, create_mapinfo)
+  logp_plot_limit = 12
+  # PLOT
+  binsToPlot = length(data_plot)
+  color <- rep(c("#377EB8","#4DAF4A"),100)
+  par(mar=c(6, 7, 6, 3))
+  bin_to_plot = data_plot[[1]]
+  plot(bin_to_plot$mapinfo, bin_to_plot$log_step2p,
+       col = ifelse(bin_to_plot$snp %in% significant_hits[, 'snp'], '#E41A1C','#377EB8'),
+       pch = ifelse(bin_to_plot$snp %in% significant_hits[, 'snp'], 19, 20),
+       cex = ifelse(bin_to_plot$snp %in% significant_hits[, 'snp'], 1.3, 1.7),
+       xlab="Bin number for step1 p value",
+       ylab="-log10(step2 chiSqGxE p value)",
+       xlim=c(0, binsToPlot),
+       ylim=c(0, logp_plot_limit),
+       axes=F,
+       cex.main = 1.7,
+       cex.axis = 1.7,
+       cex.lab = 1.7,
+       cex.sub = 1.7)
+  lines(bin_to_plot$mapinfo, bin_to_plot$log_step2p_siglvl, col = "black", lwd=1)
+
+  # remaining bins
+  for(i in 2:binsToPlot) {
+    bin_to_plot = data_plot[[i]]
+    points(bin_to_plot$mapinfo, bin_to_plot$log_step2p,
+           col = ifelse(bin_to_plot$snp %in% significant_hits$snp, '#E41A1C', color[i]),
+           pch = ifelse(bin_to_plot$snp %in% significant_hits$snp, 19, 20),
+           cex = ifelse(bin_to_plot$snp %in% significant_hits$snp, 1.3, 1.7),
+           cex.main = 1.7,
+           cex.axis = 1.7,
+           cex.lab = 1.7,
+           cex.sub = 1.7)
+    lines(bin_to_plot$mapinfo, bin_to_plot$log_step2p_sig, col = "black",lwd = 1)
+  }
+  axis(1, at = c(-1.5, seq(0.5, binsToPlot-0.2, 1)), label = c(0, seq(1, binsToPlot, 1)), cex.axis = 1.7)
+  axis(2, at = c(0:floor(logp_plot_limit)), label = c(0:logp_plot_limit), cex.axis=1.7)
+}
+
+# significant findings
+# report SNP, step1, step2
+sig_twostep <- function(data, step1_statistic, step1_df, sizeBin0, alpha) {
+  # create bins
+  m = nrow(output)
+  nbins = ceiling(log2(m/sizeBin0 + 1))
+  sizeBin = c(sizeBin0 * 2^(0:(nbins-2)), m - sizeBin0 * (2^(nbins-1) - 1) )
+  endpointsBin = cumsum(sizeBin)
+  rk.pv <- c(1:m)
+  grp <- ceiling(log(rk.pv/sizeBin0+1,base=2))
+  rep_helper <- c(table(grp))
+  alphaBin = alpha * 2 ^ -(1:nbins) / sizeBin
+  alphaBin_dat <- rep(alphaBin, rep_helper)
+  # create pvalues and bin variables
+  data$step1p <- pchisq(data[, step1_statistic], df = step1_df, lower.tail = F)
+  data$step2p <- pchisq(data[, 'lrtgxe'], df = 1, lower.tail = F)
+  data                   <- data[order(-data[,step1_statistic]), ]   # sort by step1_statistic
+  data$bin_number        <- as.numeric(grp)
+  data$step2p_siglvl     <- as.numeric(alphaBin_dat)
+  data$log_step2p_siglvl <- -log10(data$step2p_siglvl)
+  data$log_step2p        <- -log10(data$step2p)
+  significant_hits <- data[which(data$step2p < data$step2p_siglvl), c("snp", "step1p", "step2p")]
+  return(significant_hits)
+}
+```
+
+### Twostep D|G
+```{r, echo = T}
+plot_twostep(output, step1_statistic = 'lrtdg', step1_df = 1, sizeBin0 = 5, alpha = 0.05)
+kable(sig_twostep(output, step1_statistic = 'lrtdg', step1_df = 1, sizeBin0 = 5, alpha = 0.05)) %>% kable_styling()
+```
+
+### Twostep E|G
+```{r, echo = T}
+plot_twostep(output, step1_statistic = 'lrteg', step1_df = 1, sizeBin0 = 5, alpha = 0.05)
+kable(sig_twostep(output, step1_statistic = 'lrteg', step1_df = 1, sizeBin0 = 5, alpha = 0.05)) %>% kable_styling()
+```
+
+### Twostep EDGE
+```{r, echo = T}
+plot_twostep(output, step1_statistic = 'lrtedge', step1_df = 2, sizeBin0 = 5, alpha = 0.05)
+kable(sig_twostep(output, step1_statistic = 'lrtedge', step1_df = 2, sizeBin0 = 5, alpha = 0.05)) %>% kable_styling()
+```
+
+
+<br>
+
+----
+
+<br>
+
+
+# G x Maternal smoking and childhood BMI
+
+Perform GxE analysis using `GxEScanR` to assess interactions between maternal smoking + genetic variants in determining childhood BMI. 
+
+In this example, I have provided the necessary files for you to perform the scan. 
+
+Prepare data - specify variables for analysis and obtain variables from the MultiAssay file:
+```{r, eval = F, class.source = "fold-show"}
+## specify analysis variables
+outcome.Name <- "hs_bmi_c_cat"
+exposure.Name <- "e3_asmokcigd_p_None"
+covariate.Names <- c("h_mbmi_None","e3_sex_None","h_age_None","h_cohort","h_edumc_None","ethn_PC1","ethn_PC2")
+snp.Names <- paste("SNP", 1:1000, sep=".")
+variables <- c(covariate.Names, exposure.Name, "h_ethnicity_cauc", snp.Names)
+## Subset dataset to the variables we want
+load("~/Google Drive/My Drive/SHARP.MultiomicsWorkshop.USC.share/data/HELIX.MultiAssayExperiment.RData")
+d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name)
+# 1) select variables but keep in MultiAssayExperiment format
+# 2) intersectionColumns selects only individuals with complete data
+# 3) wideFormat returns as a DataFrame
+```
+
+<br>
+
+Next, create covariate files, re-arrange column order to suit requirements of the GxEScanR package.
+
+The order of variables should be as follows:
+* ID
+* Outcome
+* Covariates
+* Exposure (interaction variable)
+
+```{r, eval = F, class.source = "fold-show"}
+```
+
+<br>
+
+
+Genotype data (VCF + INFO files will be provided rather than generated by the partipants, but just want to emphasize that the file type requirements are the ones commonly output by imputation software.. when analyzing measured genotypes, will likely need to convert plink etc into VCF, which is easy to do)
+
+```{r}
+```
+
+
+
