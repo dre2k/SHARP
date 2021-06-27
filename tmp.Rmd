@@ -99,8 +99,8 @@ variables <- c(covariate.Names, exposure.Name, "h_ethnicity_cauc", snp.Names)
 # 2) intersectionColumns selects only individuals with complete data (N = 1,122)
 # 3) wideFormat returns as a data.frame
 # d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name)
-# saveRDS(d, "data/d_smoke.rds")
-d <- readRDS("data/d_smoke.rds")
+saveRDS(d, "data/d_smoking.rds")
+d <- readRDS("data/d_smoking.rds")
 
 # ---- Create genotype design matrix ---- #
 X <- d[,grep("SNP", names(d))]
