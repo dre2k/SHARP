@@ -99,7 +99,7 @@ variables <- c(covariate.Names, exposure.Name, "h_ethnicity_cauc", snp.Names)
 # 2) intersectionColumns selects only individuals with complete data (N = 1,122)
 # 3) wideFormat returns as a data.frame
 # d <- wideFormat(intersectColumns(helix_ma[variables, ,]), colDataCols=outcome.Name)
-saveRDS(d, "data/d_smoking.rds")
+# saveRDS(d, "data/d_smoking.rds")
 d <- readRDS("data/d_smoking.rds")
 
 # ---- Create genotype design matrix ---- #
@@ -175,6 +175,8 @@ univariate.results <- t(sapply(univariate_vars, FUN=function(p) {  # using index
 univariate.results <- data.frame(univariate_vars,univariate.results)
 names(univariate.results) <- c("Variable","Estimate", "SD","Z.Statistic", "P-value")
 univariate.results$`P-value` <-  format(univariate.results$`P-value`, scientific=T)
+
+saveRDS(univariate.results, "data/univariate.results.smoke.rds")
 
 kable(univariate.results) %>% 
   kable_styling()
